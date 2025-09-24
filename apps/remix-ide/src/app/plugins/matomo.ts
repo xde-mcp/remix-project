@@ -1,8 +1,6 @@
 'use strict'
 import { Plugin } from '@remixproject/engine'
 
-const _paq = window._paq = window._paq || []
-
 const profile = {
   name: 'matomo',
   description: 'send analytics to Matomo',
@@ -14,13 +12,20 @@ const profile = {
 const allowedPlugins = ['LearnEth', 'etherscan', 'vyper', 'circuit-compiler', 'doc-gen', 'doc-viewer', 'solhint', 'walletconnect', 'scriptRunner', 'scriptRunnerBridge', 'dgit', 'contract-verification', 'noir-compiler']
 
 export class Matomo extends Plugin {
+  _paq: { push: (data: string[]) => void }
 
-  constructor() {
+  constructor(_paq: { push: (data: string[]) => void }) {
     super(profile)
+    this._paq = _paq
   }
 
   async track(data: string[]) {
     if (!allowedPlugins.includes(this.currentRequest.from)) return
-    _paq.push(data)
+    this._paq.push(data)
+  }
+
+  push(data: string[]) {
+    console.log('data coming through matomo plugin:', ...data)
+    this._paq.push(data)
   }
 }

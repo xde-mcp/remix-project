@@ -112,8 +112,6 @@ import TabProxy from './app/panels/tab-proxy.js'
 import { Plugin } from '@remixproject/engine'
 import BottomBarPanel from './app/components/bottom-bar-panel'
 
-const _paq = (window._paq = window._paq || [])
-
 export class platformApi {
   get name() {
     return isElectron() ? appPlatformTypes.desktop : appPlatformTypes.web
@@ -160,7 +158,9 @@ class AppComponent {
   settings: SettingsTab
   params: any
   desktopClientMode: boolean
-  constructor() {
+  matomo: Matomo
+  constructor(matomo: Matomo) {
+    this.matomo = matomo
     const PlatFormAPi = new platformApi()
     Registry.getInstance().put({
       api: PlatFormAPi,
@@ -217,7 +217,7 @@ class AppComponent {
     this.workspace = pluginLoader.get()
     if (pluginLoader.current === 'queryParams') {
       this.workspace.map((workspace) => {
-        _paq.push(['trackEvent', 'App', 'queryParams-activated', workspace])
+        this.matomo.push(['trackEvent', 'App', 'queryParams-activated', workspace])
       })
     }
     this.engine = new RemixEngine()
@@ -246,7 +246,7 @@ class AppComponent {
     this.showMatomo = contextShouldShowMatomo && (!this.matomoConfAlreadySet || shouldRenewConsent)
 
     if (this.showMatomo && shouldRenewConsent) {
-      _paq.push(['trackEvent', 'Matomo', 'refreshMatomoPermissions']);
+      this.matomo.push(['trackEvent', 'Matomo', 'refreshMatomoPermissions']);
     }
 
     this.walkthroughService = new WalkthroughService(appManager)
@@ -306,9 +306,6 @@ class AppComponent {
 
     //---- git
     const git = new GitPlugin()
-
-    //---- matomo
-    const matomo = new Matomo()
 
     //---------------- Solidity UML Generator -------------------------
     const solidityumlgen = new SolidityUmlGen(appManager)
@@ -454,7 +451,7 @@ class AppComponent {
       templates,
       git,
       pluginStateLogger,
-      matomo,
+      this.matomo,
       templateSelection,
       scriptRunnerUI,
       remixAI,
@@ -685,7 +682,7 @@ class AppComponent {
               if (callDetails.length > 1) {
                 this.appManager.call('notification', 'toast', `initiating ${callDetails[0]} and calling "${callDetails[1]}" ...`)
                 // @todo(remove the timeout when activatePlugin is on 0.3.0)
-                _paq.push(['trackEvent', 'App', 'queryParams-calls', this.params.call])
+                this.matomo.push(['trackEvent', 'App', 'queryParams-calls', this.params.call])
                 //@ts-ignore
                 await this.appManager.call(...callDetails).catch(console.error)
               }
@@ -696,7 +693,7 @@ class AppComponent {
 
               // call all functions in the list, one after the other
               for (const call of calls) {
-                _paq.push(['trackEvent', 'App', 'queryParams-calls', call])
+                this.matomo.push(['trackEvent', 'App', 'queryParams-calls', call])
                 const callDetails = call.split('//')
                 if (callDetails.length > 1) {
                   this.appManager.call('notification', 'toast', `initiating ${callDetails[0]} and calling "${callDetails[1]}" ...`)
