@@ -1,6 +1,6 @@
 'use strict'
 import { EventManager } from '../eventManager'
-import type { Transaction as InternalTransaction } from './txRunner'
+import type { Transaction as InternalTransaction, TxResult} from './txRunner'
 import { Web3 } from 'web3'
 import { BrowserProvider } from 'ethers'
 import { normalizeHexAddress } from '../helpers/uiHelper'
@@ -88,7 +88,7 @@ export class TxRunnerWeb3 {
           })
         })
       }
-      listenOnResponse().then((txData) => {
+      listenOnResponse().then((txData: TxResult) => {
         callback(null, txData)
       }).catch((error) => { callback(error) })
     }
@@ -347,3 +347,4 @@ async function tryTillTxAvailable (txhash: string, web3: Web3) {
 }
 
 async function pause () { return new Promise((resolve, reject) => { setTimeout(resolve, 500) }) }
+

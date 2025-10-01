@@ -104,14 +104,16 @@ export interface CompilerConfigArgs {
 
 export interface DeployContractArgs {
   contractName: string;
-  constructorArgs?: any[];
+  constructorArgs: any[];
   gasLimit?: number;
   gasPrice?: string;
   value?: string;
   account?: string;
+  file: string;
 }
 
 export interface CallContractArgs {
+  contractName: string;
   address: string;
   abi: any[];
   methodName: string;
@@ -254,9 +256,9 @@ export interface DeploymentResult {
   success: boolean;
   contractAddress?: string;
   transactionHash: string;
-  gasUsed: number;
+  gasUsed: number | bigint;
   effectiveGasPrice: string;
-  blockNumber: number;
+  blockNumber: number | bigint;
   logs: any[];
 }
 
@@ -264,7 +266,7 @@ export interface ContractInteractionResult {
   success: boolean;
   result?: any;
   transactionHash?: string;
-  gasUsed?: number;
+  gasUsed?: number | bigint;
   logs?: any[];
   error?: string;
 }

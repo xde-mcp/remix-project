@@ -2,7 +2,7 @@ export { OffsetToLineColumnConverter } from './lib/offset-line-to-column-convert
 export { CompilerMetadata } from './lib/compiler-metadata'
 export { FetchAndCompile } from './lib/compiler-fetch-and-compile'
 export { CompilerImports } from './lib/compiler-content-imports'
-export { CompilerArtefacts } from './lib/compiler-artefacts'
+export { CompilerArtefacts, getContractData } from './lib/compiler-artefacts'
 export { GistHandler } from './lib/gist-handler'
 export * from './types/contract'
 export { LinkLibraries, DeployLibraries } from './lib/link-libraries'

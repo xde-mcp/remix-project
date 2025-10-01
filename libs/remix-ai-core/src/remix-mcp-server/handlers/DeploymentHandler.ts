@@ -14,7 +14,12 @@ import {
   AccountInfo,
   ContractInteractionResult
 } from '../types/mcpTools';
+import { bytesToHex } from '@ethereumjs/util'
 import { Plugin } from '@remixproject/engine';
+import { getContractData } from '@remix-project/core-plugin'
+import type { TxResult } from '@remix-project/remix-lib';
+import type { TransactionReceipt } from 'web3'
+import web3 from 'web3'
 
 /**
  * Deploy Contract Tool Handler
@@ -54,6 +59,10 @@ export class DeployContractHandler extends BaseToolHandler {
       account: {
         type: 'string',
         description: 'Account to deploy from (address or index)'
+      },
+      file: {
+        type: 'string',
+        description: 'The file containing the contract to deploy'
       }
     },
     required: ['contractName']
@@ -86,56 +95,54 @@ export class DeployContractHandler extends BaseToolHandler {
   async execute(args: DeployContractArgs, plugin: Plugin): Promise<IMCPToolResult> {
     try {
       // Get compilation result to find contract
-      // TODO: Get actual compilation result
-      const contracts = {}; // await plugin.solidity.getCompilationResult();
+      const compilerAbstract = await plugin.call('compilerArtefacts', 'getCompilerAbstract', args.file) as any;
+      const data = getContractData(args.contractName, compilerAbstract)
+      if (!data) {
+        return this.createErrorResult(`Could not retrieve contract data for '${args.contractName}'`);
+      }
+
+      let txReturn
+      try {
+        txReturn = await new Promise(async (resolve, reject) => {
+          const callbacks = { continueCb: (error, continueTxExecution, cancelCb) => {
+            continueTxExecution()
+          }, promptCb: () => {}, statusCb: () => {}, finalCb: (error, contractObject, address: string, txResult: TxResult) => {
+            if (error) return reject(error)
+            resolve({contractObject, address, txResult})
+          }}
+          const confirmationCb = (network, tx, gasEstimation, continueTxExecution, cancelCb) => {
+            continueTxExecution(null)
+          }
+          const compilerContracts = await plugin.call('compilerArtefacts', 'getLastCompilationResult')
+          plugin.call('blockchain', 'deployContractAndLibraries', 
+            data, 
+            args.constructorArgs ? args : [],
+            null, 
+            compilerContracts.getData().contracts, 
+            callbacks, 
+            confirmationCb
+          )
+        })
+      } catch (e) {
+        return this.createErrorResult(`Deployment error: ${e.message}`);
+      }
       
-      if (!contracts || Object.keys(contracts).length === 0) {
-        return this.createErrorResult('No compiled contracts found. Please compile first.');
-      }
-
-      // Find the contract to deploy
-      const contractKey = Object.keys(contracts).find(key => 
-        key.includes(args.contractName)
-      );
-
-      if (!contractKey) {
-        return this.createErrorResult(`Contract '${args.contractName}' not found in compilation result`);
-      }
-
-      // Get current account
-      const accounts = await this.getAccounts(plugin);
-      const deployAccount = args.account || accounts[0];
-
-      if (!deployAccount) {
-        return this.createErrorResult('No account available for deployment');
-      }
-
-      // Prepare deployment transaction
-      const deploymentData = {
-        contractName: args.contractName,
-        account: deployAccount,
-        constructorArgs: args.constructorArgs || [],
-        gasLimit: args.gasLimit,
-        gasPrice: args.gasPrice,
-        value: args.value || '0'
-      };
-
-      // TODO: Execute actual deployment via Remix Run Tab API
-      const mockResult: DeploymentResult = {
-        success: false,
-        contractAddress: undefined,
-        transactionHash: '0x' + Math.random().toString(16).substr(2, 64),
-        gasUsed: args.gasLimit || 1000000,
+      
+      console.log('txReturn', txReturn)
+      const receipt = (txReturn.txResult.receipt as TransactionReceipt)
+      const result: DeploymentResult = {
+        transactionHash: web3.utils.bytesToHex(receipt.transactionHash),
+        gasUsed: web3.utils.toNumber(receipt.gasUsed),
         effectiveGasPrice: args.gasPrice || '20000000000',
-        blockNumber: Math.floor(Math.random() * 1000000),
-        logs: []
+        blockNumber: web3.utils.toNumber(receipt.blockNumber),
+        logs: receipt.logs,
+        contractAddress: receipt.contractAddress,
+        success: receipt.status === BigInt(1) ? true : false        
       };
 
-      // Mock implementation - in real implementation, use Remix deployment API
-      mockResult.success = true;
-      mockResult.contractAddress = '0x' + Math.random().toString(16).substr(2, 40);
+      plugin.call('udapp', 'addInstance', result.contractAddress, data.abi, args.contractName, data)
 
-      return this.createSuccessResult(mockResult);
+      return this.createSuccessResult(result);
 
     } catch (error) {
       return this.createErrorResult(`Deployment failed: ${error.message}`);
@@ -161,6 +168,11 @@ export class CallContractHandler extends BaseToolHandler {
   inputSchema = {
     type: 'object',
     properties: {
+      contractName: {
+        type: 'string',
+        description: 'Contract name',
+        pattern: '^0x[a-fA-F0-9]{40}$'
+      },
       address: {
         type: 'string',
         description: 'Contract address',
@@ -238,43 +250,65 @@ export class CallContractHandler extends BaseToolHandler {
 
   async execute(args: CallContractArgs, plugin: Plugin): Promise<IMCPToolResult> {
     try {
-      // Find the method in ABI
-      const method = args.abi.find((item: any) => 
-        item.name === args.methodName && item.type === 'function'
-      );
-
-      if (!method) {
-        return this.createErrorResult(`Method '${args.methodName}' not found in ABI`);
+      const funcABI = args.abi.find((item: any) => item.name === args.methodName && item.type === 'function')
+      const isView =  funcABI.stateMutability === 'view' || funcABI.stateMutability === 'pure';
+      let txReturn
+      try {        
+        txReturn = await new Promise(async (resolve, reject) => {
+          const params = funcABI.type !== 'fallback' ? args.args.join(',') : ''
+          plugin.call('blockchain', 'runOrCallContractMethod', 
+            args.contractName,
+            args.abi,      
+            funcABI,
+            undefined,
+            args.args ? args : [],
+            args.address,
+            params,
+            isView,
+            (msg) => {
+              // logMsg
+            },
+            (msg) => {
+              // logCallback
+            },
+            (returnValue) => {
+              // outputCb
+            },
+            (network, tx, gasEstimation, continueTxExecution, cancelCb) => {
+              // confirmationCb
+              continueTxExecution(null)
+            },
+            (error, continueTxExecution, cancelCb) => {
+              // continueCb
+              continueTxExecution()
+            },
+            (okCb, cancelCb) => {
+              // promptCb
+            },
+            (error, cancelCb) => {
+              // promptCb
+            },
+            (error, {txResult, address, returnValue}) => {
+              if (error) return reject(error)
+              resolve({txResult, address, returnValue})
+            },
+          )
+        })
+      } catch (e) {
+        return this.createErrorResult(`Deployment error: ${e.message}`);
       }
-
-      // Get accounts
-      const accounts = await this.getAccounts(plugin);
-      const callAccount = args.account || accounts[0];
-
-      if (!callAccount) {
-        return this.createErrorResult('No account available for contract call');
-      }
-
-      // Determine if this is a view function or transaction
-      const isView = method.stateMutability === 'view' || method.stateMutability === 'pure';
 
       // TODO: Execute contract call via Remix Run Tab API
-      const mockResult: ContractInteractionResult = {
-        success: true,
-        result: isView ? 'mock_view_result' : undefined,
-        transactionHash: isView ? undefined : '0x' + Math.random().toString(16).substr(2, 64),
-        gasUsed: isView ? 0 : (args.gasLimit || 100000),
-        logs: []
+      const receipt = (txReturn.txResult.receipt as TransactionReceipt)
+      const result: ContractInteractionResult = {
+        result: txReturn.returnValue,
+        transactionHash: isView ? undefined : web3.utils.bytesToHex(receipt.transactionHash),
+        gasUsed: web3.utils.toNumber(receipt.gasUsed),        
+        logs: receipt.logs,
+        success: receipt.status === BigInt(1) ? true : false     
       };
 
-      if (isView) {
-        mockResult.result = `View function result for ${args.methodName}`;
-      } else {
-        mockResult.transactionHash = '0x' + Math.random().toString(16).substr(2, 64);
-        mockResult.gasUsed = args.gasLimit || 100000;
-      }
-
-      return this.createSuccessResult(mockResult);
+      return this.createSuccessResult(result);
 
     } catch (error) {
       return this.createErrorResult(`Contract call failed: ${error.message}`);

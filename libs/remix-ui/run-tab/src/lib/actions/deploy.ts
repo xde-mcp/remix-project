@@ -1,4 +1,4 @@
-import { ContractData, FuncABI, NetworkDeploymentFile, SolcBuildFile, OverSizeLimit } from "@remix-project/core-plugin"
+import { ContractData, FuncABI, NetworkDeploymentFile, SolcBuildFile, OverSizeLimit, getContractData } from "@remix-project/core-plugin"
 import { RunTab } from "../types/run-tab"
 import { CompilerAbstract as CompilerAbstractType } from '@remix-project/remix-solidity'
 import * as remixLib from '@remix-project/remix-lib'
@@ -37,49 +37,6 @@ const loadContractFromAddress = (plugin: RunTab, address, confirmCb, cb) => {
   } else {
     _paq.push(['trackEvent', 'udapp', 'useAtAddress', 'AtAddressLoadWithArtifacts'])
     cb(null, 'instance')
-  }
-}
-
-export const getSelectedContract = (contractName: string, compiler: CompilerAbstractType): ContractData => {
-  if (!contractName) return null
-  // const compiler = plugin.compilersArtefacts[compilerAttributeName]
-
-  if (!compiler) return null
-
-  const contract = compiler.getContract(contractName)
-
-  return {
-    name: contractName,
-    contract: contract,
-    compiler: compiler,
-    abi: contract.object.abi,
-    bytecodeObject: contract.object.evm.bytecode.object,
-    bytecodeLinkReferences: contract.object.evm.bytecode.linkReferences,
-    object: contract.object,
-    deployedBytecode: contract.object.evm.deployedBytecode,
-    getConstructorInterface: () => {
-      return txHelper.getConstructorInterface(contract.object.abi)
-    },
-    getConstructorInputs: () => {
-      const constructorInterface = txHelper.getConstructorInterface(contract.object.abi)
-
-      return txHelper.inputParametersDeclarationToString(constructorInterface.inputs)
-    },
-    isOverSizeLimit: async (args: string) => {
-      const encodedParams = await txFormat.encodeParams(args, txHelper.getConstructorInterface(contract.object.abi))
-      const bytecode = contract.object.evm.bytecode.object + (encodedParams as any).dataHex
-      // https://eips.ethereum.org/EIPS/eip-3860
-      const initCodeOversize = bytecode && (bytecode.length / 2 > 2 * 24576)
-
-      const deployedBytecode = contract.object.evm.deployedBytecode
-      // https://eips.ethereum.org/EIPS/eip-170
-      const deployedBytecodeOversize = deployedBytecode && (deployedBytecode.object.length / 2 > 24576)
-      return {
-        overSizeEip3860: initCodeOversize,
-        overSizeEip170: deployedBytecodeOversize
-      }
-    },
-    metadata: contract.object.metadata
   }
 }
 
@@ -269,7 +226,7 @@ export const loadAddress = (plugin: RunTab, dispatch: React.Dispatch<any>, contr
         if (!contract) return plugin.call('notification', 'toast', 'No compiled contracts found.')
         const currentFile = plugin.REACT_API.contracts.currentFile
         const compiler = plugin.REACT_API.contracts.contractList[currentFile].find(item => item.alias === contract.name)
-        const contractData = getSelectedContract(contract.name, compiler.compiler)
+        const contractData = getContractData(contract.name, compiler.compiler)
         return addInstance(dispatch, { contractData, address, name: contract.name })
       }
     }
