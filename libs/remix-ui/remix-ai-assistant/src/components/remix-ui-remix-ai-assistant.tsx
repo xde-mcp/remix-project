@@ -12,6 +12,7 @@ import { ActivityType, ChatMessage } from '../lib/types'
 import { groupListType } from '../types/componentTypes'
 import GroupListMenu from './contextOptMenu'
 import { useOnClickOutside } from './onClickOutsideHook'
+import { useAudioTranscription } from '../hooks/useAudioTranscription'
 
 const _paq = (window._paq = window._paq || [])
 
@@ -61,6 +62,58 @@ export const RemixUiRemixAiAssistant = React.forwardRef<
   const contextBtnRef = useRef(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const aiChatRef = useRef<HTMLDivElement>(null)
+
+  // Ref to hold the sendPrompt function for audio transcription callback
+  const sendPromptRef = useRef<((prompt: string) => Promise<void>) | null>(null)
+
+  // Audio transcription hook
+  const {
+    isRecording,
+    isTranscribing,
+    error: transcriptionError,
+    toggleRecording
+  } = useAudioTranscription({
+    apiKey: 'fw_3ZZeKZ67JHvZKahmHUvo8XTR',
+    model: 'whisper-v3',
+    onTranscriptionComplete: async (text) => {
+      if (sendPromptRef.current) {
+        await sendPromptRef.current(text)
+        _paq.push(['trackEvent', 'remixAI', 'SpeechToTextPrompt', text])
+      }
+    },
+    onError: (error) => {
+      console.error('Audio transcription error:', error)
+      setMessages(prev => [...prev, {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: `**Audio transcription failed.**\n\nError: ${error.message}`,
+        timestamp: Date.now(),
+        sentiment: 'none'
+      }])
+    }
+  })
+
+  // Show transcribing status
+  useEffect(() => {
+    if (isTranscribing) {
+      setMessages(prev => [...prev, {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: '***Transcribing audio...***',
+        timestamp: Date.now(),
+        sentiment: 'none'
+      }])
+    } else {
+      // Remove transcribing message when done
+      setMessages(prev => {
+        const last = prev[prev.length - 1]
+        if (last?.content === '***Transcribing audio...***') {
+          return prev.slice(0, -1)
+        }
+        return prev
+      })
+    }
+  }, [isTranscribing])
 
   useOnClickOutside([modelBtnRef, contextBtnRef], () => setShowAssistantOptions(false))
   useOnClickOutside([modelBtnRef, contextBtnRef], () => setShowContextOptions(false))
@@ -428,6 +481,12 @@ export const RemixUiRemixAiAssistant = React.forwardRef<
     },
     [isStreaming, props.plugin]
   )
+
+  // Update ref for audio transcription callback
+  useEffect(() => {
+    sendPromptRef.current = sendPrompt
+  }, [sendPrompt])
+
   const handleGenerateWorkspaceWithPrompt = useCallback(async (prompt: string) => {
     dispatchActivity('button', 'generateWorkspace')
     if (prompt && prompt.trim()) {
@@ -646,6 +705,13 @@ export const RemixUiRemixAiAssistant = React.forwardRef<
     )
   }
 
+  const handleRecord = useCallback(async () => {
+    await toggleRecording()
+    if (!isRecording) {
+      _paq.push(['trackEvent', 'remixAI', 'StartAudioRecording'])
+    }
+  }, [toggleRecording, isRecording])
+
   const handleGenerateWorkspace = useCallback(async () => {
     dispatchActivity('button', 'generateWorkspace')
     try {
@@ -800,6 +866,8 @@ export const RemixUiRemixAiAssistant = React.forwardRef<
           handleSetModel={handleSetModel}
           handleModelSelection={handleModelSelection}
           handleGenerateWorkspace={handleGenerateWorkspace}
+          handleRecord={handleRecord}
+          isRecording={isRecording}
           dispatchActivity={dispatchActivity}
           contextBtnRef={contextBtnRef}
           modelBtnRef={modelBtnRef}
