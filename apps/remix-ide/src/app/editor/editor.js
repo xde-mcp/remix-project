@@ -6,6 +6,8 @@ import { Plugin } from '@remixproject/engine'
 import * as packageJson from '../../../../../package.json'
 import { PluginViewWrapper } from '@remix-ui/helper'
 
+import { fetchAndLoadTypes } from './type-fetcher'
+
 const EventManager = require('../../lib/events')
 
 const profile = {
@@ -71,10 +73,17 @@ export default class Editor extends Plugin {
     this.api = {}
     this.dispatch = null
     this.ref = null
+
+    this.monaco = null
+    this.typeLoaderDebounce = null
   }
 
   setDispatch (dispatch) {
     this.dispatch = dispatch
+  }
+
+  setMonaco (monaco) {
+    this.monaco = monaco
   }
 
   updateComponent(state) {
@@ -86,6 +95,7 @@ export default class Editor extends Plugin {
       events={state.events}
       plugin={state.plugin}
       isDiff={state.isDiff}
+      setMonaco={(monaco) => this.setMonaco(monaco)}
     />
   }
 
@@ -128,6 +138,17 @@ export default class Editor extends Plugin {
 
   async onActivation () {
     this.activated = true
+    this.on('editor', 'editorMounted', () => {
+      if (!this.monaco) return
+      const tsDefaults = this.monaco.languages.typescript.typescriptDefaults
+      
+      tsDefaults.setCompilerOptions({
+        moduleResolution: this.monaco.languages.typescript.ModuleResolutionKind.NodeJs,
+        typeRoots: ["file:///node_modules/@types", "file:///node_modules"],
+        target: this.monaco.languages.typescript.ScriptTarget.ES2020,
+        allowNonTsExtensions: true,
+      })
+    })
     this.on('sidePanel', 'focusChanged', (name) => {
       this.keepDecorationsFor(name, 'sourceAnnotationsPerFile')
       this.keepDecorationsFor(name, 'markerPerFile')
@@ -158,6 +179,30 @@ export default class Editor extends Plugin {
 
   async _onChange (file) {
     this.triggerEvent('didChangeFile', [file])
+    
+    if (this.monaco && (file.endsWith('.ts') || file.endsWith('.js'))) {
+      clearTimeout(this.typeLoaderDebounce)
+      this.typeLoaderDebounce = setTimeout(async () => {
+        if (!this.monaco) return
+        const model = this.monaco.editor.getModel(this.monaco.Uri.parse(file))
+        if (!model) return
+        const code = model.getValue()
+        
+        try {
+          const npmImports = [...code.matchAll(/from\s+['"]((?![./]).+)['"]/g)].map(match => match[1])
+          const uniquePackages = [...new Set(npmImports)]
+          
+          if (uniquePackages.length > 0) {
+            await Promise.all(uniquePackages.map(pkg => fetchAndLoadTypes(pkg, this.monaco)))
+            const tsDefaults = this.monaco.languages.typescript.typescriptDefaults
+            tsDefaults.setCompilerOptions(tsDefaults.getCompilerOptions())
+          }
+        } catch (error) {
+          console.error('[Type Loader] Error during type loading process:', error)
+        }
+      }, 1500)
+    }
+
     const currentFile = await this.call('fileManager', 'file')
     if (!currentFile) {
       return
@@ -232,7 +277,7 @@ export default class Editor extends Plugin {
               this.emit('addModel', contentDep, 'typescript', pathDep, this.readOnlySessions[path])
             }
           } else {
-            console.log("The file ", pathDep, " can't be found.")
+            // console.log("The file ", pathDep, " can't be found.")
           }
         } catch (e) {
           console.log(e)

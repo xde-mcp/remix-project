@@ -28,6 +28,7 @@ import { noirLanguageConfig, noirTokensProvider } from './syntaxes/noir'
 import { IPosition, IRange } from 'monaco-editor'
 import { GenerationParams } from '@remix/remix-ai-core';
 import { RemixInLineCompletionProvider } from './providers/inlineCompletionProvider'
+import { RemixTSCompletionProvider } from './providers/tsCompletionProvider'
 const _paq = (window._paq = window._paq || [])
 
 // Key for localStorage
@@ -154,6 +155,7 @@ export interface EditorUIProps {
   }
   plugin: PluginType
   editorAPI: EditorAPIType
+  setMonaco: (monaco: Monaco) => void
 }
 const contextMenuEvent = new EventManager()
 export const EditorUI = (props: EditorUIProps) => {
@@ -1152,6 +1154,7 @@ export const EditorUI = (props: EditorUIProps) => {
 
   function handleEditorWillMount(monaco) {
     monacoRef.current = monaco
+    props.setMonaco(monaco)
     // Register a new language
     monacoRef.current.languages.register({ id: 'remix-solidity' })
     monacoRef.current.languages.register({ id: 'remix-cairo' })
@@ -1164,9 +1167,11 @@ export const EditorUI = (props: EditorUIProps) => {
     // Allow JSON schema requests
     monacoRef.current.languages.json.jsonDefaults.setDiagnosticsOptions({ enableSchemaRequest: true })
 
+    monacoRef.current.languages.registerCompletionItemProvider('typescript', new RemixTSCompletionProvider(monaco))
+    monacoRef.current.languages.registerCompletionItemProvider('javascript', new RemixTSCompletionProvider(monaco))
+
     // hide the module resolution error. We have to remove this when we know how to properly resolve imports.
     monacoRef.current.languages.typescript.typescriptDefaults.setDiagnosticsOptions({ diagnosticCodesToIgnore: [2792]})
-
     // Register a tokens provider for the language
     monacoRef.current.languages.setMonarchTokensProvider('remix-solidity', solidityTokensProvider as any)
     monacoRef.current.languages.setLanguageConfiguration('remix-solidity', solidityLanguageConfig as any)
