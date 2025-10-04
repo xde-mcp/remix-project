@@ -36,7 +36,7 @@ async function main() {
     branch,
     parameters: {
       // This parameter is used to enable the workflow and filter tests
-      run_file_tests: String(args.pattern)
+      run_file_tests: normalizePattern(String(args.pattern))
     }
   }
 
@@ -78,6 +78,20 @@ async function main() {
     else console.error(err.message)
     process.exit(1)
   }
+}
+
+function normalizePattern(p) {
+  try {
+    const path = require('path')
+    // If a path-like string or explicit extension is provided, reduce to base name without extension
+    const hasSlash = /[\\/]/.test(p) || /^dist[\\/]/.test(p)
+    const hasExt = /\.(ts|js)$/i.test(p)
+    if (hasSlash || hasExt) {
+      const base = path.basename(p)
+      return base.replace(/\.(ts|js)$/i, '') // keep e.g. url_group1.test
+    }
+  } catch (_) {}
+  return p
 }
 
 function parseArgs(argv) {

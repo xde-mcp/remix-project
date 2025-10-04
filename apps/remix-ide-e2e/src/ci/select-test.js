@@ -180,9 +180,10 @@ async function runRemoteInteractive() {
   const choice = await promptList('Select a test to run remotely:', [...limited, 'Exit'])
   if (!choice || choice === 'Exit') process.exit(0)
 
-  // Pass the selected file path as the pattern
+  // Pass the base filename (without extension) as the pattern for CI grep compatibility
+  const base = require('path').basename(choice).replace(/\.(js|ts)$/i, '')
   const triggerPath = path.resolve(__dirname, './trigger-circleci.js')
-  const res = spawnSync('node', [triggerPath, '--pattern', choice], { stdio: 'inherit' })
+  const res = spawnSync('node', [triggerPath, '--pattern', base], { stdio: 'inherit' })
   process.exit(res.status || 0)
 }
 

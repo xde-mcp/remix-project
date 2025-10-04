@@ -145,19 +145,20 @@ jobs:
       - checkout
       - run: node apps/remix-ide-e2e/src/buildGroupTests.js
       - run:
-          name: Check for enabled tests matching tag
+          name: Check for enabled tests matching pattern
           command: |
             PATTERN="<< parameters.pattern >>"
             if [ -z "$PATTERN" ]; then
-              echo "❌ Tag parameter is empty!"
+              echo "❌ Pattern parameter is empty!"
               exit 2
             fi
-            echo "🔍 Searching for enabled tests with .$PATTERN extension..."
-            if grep -IRiL "'@disabled': \?true" "./apps/remix-ide-e2e/src/tests" | grep "${PATTERN}"; then
-              echo "✅ Found enabled .$PATTERN tests."
+            echo "🔍 Searching enabled tests containing pattern: $PATTERN"
+            FILES=$(grep -IRiL "'@disabled': \?true" "./apps/remix-ide-e2e/src/tests" | sed 's#.*/##' | sed 's/\.[tj]s$//' | grep -i "$PATTERN" || true)
+            if [ -n "$FILES" ]; then
+              echo "✅ Found matching tests:" && echo "$FILES"
               exit 0
             else
-              echo "⚠️ No enabled .$PATTERN tests found. Skipping workflow."
+              echo "⚠️ No enabled tests matched pattern: $PATTERN. Skipping workflow."
               exit 1
             fi   
 
