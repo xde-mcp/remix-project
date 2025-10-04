@@ -26,6 +26,13 @@ const fs = require('fs')
 async function main() {
   const args = parseArgs(process.argv.slice(2))
 
+  // --web: launch the SPA server and open browser
+  if (args.web) {
+    const serverPath = path.resolve(__dirname, './web-server.js')
+    const proc = spawnSync('node', [serverPath], { stdio: 'inherit' })
+    process.exit(proc.status || 0)
+  }
+
   // If flags are provided, respect them. Otherwise run interactive mode.
   const isFlagDriven = args.remote || args.pattern || args.browser || args.branch || args.org || args.repo || args.vcs
   if (!isFlagDriven) {
@@ -74,6 +81,7 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     if (a === '--remote') out.remote = true
+    else if (a === '--web') out.web = true
     else if (a === '--pattern') out.pattern = argv[++i]
     else if (a === '--browser') out.browser = argv[++i]
     else if (a === '--branch') out.branch = argv[++i]

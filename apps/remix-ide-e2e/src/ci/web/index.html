@@ -1,0 +1,117 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <title>Select Test</title>
+    <style>
+      body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 1.5rem; }
+      header { display: flex; gap: 1rem; align-items: center; }
+      .row { display: flex; gap: 0.5rem; align-items: center; }
+      input[type=text]{ padding: .4rem .6rem; width: 320px; }
+      button { padding: .4rem .7rem; cursor: pointer; }
+      table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+      th, td { border-bottom: 1px solid #ddd; padding: .4rem .6rem; text-align: left; }
+      tr:hover { background: #fafafa; }
+      .badge { font-size: .8rem; padding: .1rem .35rem; border: 1px solid #ccc; border-radius: .35rem; }
+      .ok { color: #0a0; }
+      .warn { color: #b80; }
+      .err { color: #a00; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h2>Select & Run a Test</h2>
+      <span id="status" class="badge">Loading…</span>
+    </header>
+    <div class="row">
+      <label>Filter:</label>
+      <input id="filter" type="text" placeholder="type to filter by name"/>
+      <label>Mode:</label>
+      <select id="mode">
+        <option value="local">Local</option>
+        <option value="remote">CircleCI</option>
+      </select>
+      <label>Browser:</label>
+      <select id="browser">
+        <option value="chrome">chrome</option>
+        <option value="firefox">firefox</option>
+      </select>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Test</th>
+          <th>Source</th>
+          <th>Dist</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+    <pre id="log"></pre>
+
+    <script>
+      const $ = (s) => document.querySelector(s)
+      const tbody = $('#tbody')
+      const status = $('#status')
+      const filter = $('#filter')
+      const modeSel = $('#mode')
+      const browserSel = $('#browser')
+      const log = $('#log')
+      let tests = []
+
+      async function fetchStatus() {
+        const r = await fetch('/api/status')
+        const j = await r.json()
+        const t = []
+        t.push('branch: ' + j.branch)
+        t.push('circle token: ' + (j.hasToken ? '✅' : '⚠️ missing'))
+        status.textContent = t.join(' · ')
+        status.className = 'badge ' + (j.hasToken ? 'ok' : 'warn')
+      }
+
+      function render() {
+        const q = filter.value.toLowerCase()
+        const rows = tests.filter(x => x.base.toLowerCase().includes(q)).map((t) => `
+          <tr>
+            <td><code>${t.base}</code></td>
+            <td>${t.src.replace('apps/remix-ide-e2e/src/tests/','')}</td>
+            <td>${t.hasDist ? '<span class="ok">built</span>' : '<span class="warn">missing</span>'}</td>
+            <td><button data-test="${t.base}">Run</button></td>
+          </tr>
+        `)
+        tbody.innerHTML = rows.join('')
+        tbody.querySelectorAll('button[data-test]').forEach(btn => btn.onclick = (ev) => trigger(ev.target.dataset.test))
+      }
+
+      async function load() {
+        await fetchStatus()
+        const r = await fetch('/api/tests')
+        const j = await r.json()
+        tests = j.tests || []
+        render()
+      }
+
+      async function trigger(name) {
+        const mode = modeSel.value
+        const browser = browserSel.value
+        log.textContent = `triggering ${name} (${mode})...\n`
+        const r = await fetch('/api/trigger', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode, test: name, browser }) })
+        const j = await r.json()
+        log.textContent += JSON.stringify(j, null, 2)
+        if (j.url) {
+          const a = document.createElement('a')
+          a.href = j.url
+          a.textContent = 'open pipeline'
+          a.target = '_blank'
+          log.appendChild(document.createElement('br'))
+          log.appendChild(a)
+        }
+      }
+
+      filter.oninput = render
+      load()
+    </script>
+  </body>
+  </html>

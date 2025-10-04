@@ -78,6 +78,7 @@
     "install_webdriver": "bash ./apps/remix-ide-e2e/install-webdriver.sh",
     "update_metamask": "bash ./apps/remix-ide-e2e/update_metamask.sh",
   "select_test": "dotenv -e .env.local -- node apps/remix-ide-e2e/src/ci/select-test.js",
+  "select_test:web": "dotenv -e .env.local -- node apps/remix-ide-e2e/src/ci/web-server.js",
     "onchange": "onchange apps/remix-ide/build/app.js -- npm-run-all lint",
     "remixd": "nx build remixd && chmod +x dist/libs/remixd/src/bin/remixd.js && dist/libs/remixd/src/bin/remixd.js --remix-ide http://127.0.0.1:8080",
     "simulator": "nx build remix-simulator && chmod +x dist/libs/remix-simulator/bin/ethsim && dist/libs/remix-simulator/bin/ethsim start --rpc",
