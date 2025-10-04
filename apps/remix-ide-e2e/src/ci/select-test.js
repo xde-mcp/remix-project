@@ -50,7 +50,7 @@ async function main() {
         process.exit(1)
       }
       process.env.CIRCLECI_TOKEN = token
-      maybePersistToken(token)
+      persistToken(token)
     }
 
     const triggerPath = path.resolve(__dirname, './trigger-circleci.js')
@@ -95,41 +95,28 @@ function promptPatternNonInteractive() {
 
 function promptForToken() {
   try {
-    const tty = require('tty')
     const rl = require('readline').createInterface({ input: process.stdin, output: process.stdout })
-    return syncQuestion(rl, 'Paste your CircleCI Personal API Token (hidden input not supported here): ')
+    return new Promise((resolve) => {
+      rl.question('Paste your CircleCI Personal API Token (hidden input not supported here): ', (answer) => {
+        rl.close()
+        resolve(answer && answer.trim() ? answer.trim() : null)
+      })
+    })
   } catch (e) {
     console.error('Failed to prompt for token:', e.message)
     return null
   }
 }
 
-function syncQuestion(rl, q) {
-  return new Promise((resolve) => {
-    rl.question(q, (answer) => {
-      rl.close()
-      resolve(answer && answer.trim() ? answer.trim() : null)
-    })
-  })
-}
-
-function maybePersistToken(token) {
+function persistToken(token) {
   const envPath = path.resolve(process.cwd(), '.env.local')
-  try {
-    const readline = require('readline-sync')
-    const ans = readline.question('Store token to .env.local as CIRCLECI_TOKEN for next time? (y/N): ')
-    if (String(ans).toLowerCase().startsWith('y')) {
-      let content = ''
-      if (fs.existsSync(envPath)) content = fs.readFileSync(envPath, 'utf8')
-      const lines = content.split(/\r?\n/)
-      const filtered = lines.filter((l) => !/^\s*CIRCLECI_TOKEN\s*=/.test(l))
-      filtered.push(`CIRCLECI_TOKEN=${token}`)
-      fs.writeFileSync(envPath, filtered.join('\n'))
-      console.log(`Saved CIRCLECI_TOKEN to ${envPath}`)
-    }
-  } catch (_) {
-    // readline-sync may not be installed; silently skip persistence
-  }
+  let content = ''
+  if (fs.existsSync(envPath)) content = fs.readFileSync(envPath, 'utf8')
+  const lines = content.split(/\r?\n/)
+  const filtered = lines.filter((l) => !/^\s*CIRCLECI_TOKEN\s*=/.test(l))
+  filtered.push(`CIRCLECI_TOKEN=${token}`)
+  fs.writeFileSync(envPath, filtered.join('\n'))
+  console.log(`Saved CIRCLECI_TOKEN to ${envPath}`)
 }
 
 async function promptList(title, options) {
@@ -161,7 +148,7 @@ async function runRemoteInteractive() {
       process.exit(1)
     }
     process.env.CIRCLECI_TOKEN = token
-    maybePersistToken(token)
+    persistToken(token)
   }
 
   // Build e2e to ensure dist tests exist (same as local flow)

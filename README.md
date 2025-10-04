@@ -168,6 +168,20 @@ There is a script to allow selecting the browser and a specific test to run:
 yarn run select_test
 ```
 
+Remote single-test on CircleCI
+
+- You can also trigger a single test remotely from CircleCI using the same script.
+- When prompted, choose "Remote (CircleCI)" and select the test from the list.
+- The script will ask for a CircleCI Personal API Token once and automatically store it in `.env.local` as `CIRCLECI_TOKEN` for future runs.
+
+Advanced (non-interactive):
+
+```
+yarn select_test --remote --pattern "etherscan_api.test"
+# Optional overrides
+yarn select_test --remote --pattern "\\.pr" --branch your-branch --org remix-project-org --repo remix-project
+```
+
 You need to have 
 
 - selenium running 
