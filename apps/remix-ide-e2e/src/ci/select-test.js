@@ -23,7 +23,7 @@ const { spawnSync } = require('child_process')
 const path = require('path')
 const fs = require('fs')
 
-function main() {
+async function main() {
   const args = parseArgs(process.argv.slice(2))
 
   if (args.remote) {
@@ -32,7 +32,7 @@ function main() {
 
     // Ensure we have a token; if not, prompt to paste one and optionally persist to .env.local
     if (!process.env.CIRCLECI_TOKEN && !process.env.CIRCLE_TOKEN) {
-      const token = promptForToken()
+      const token = await promptForToken()
       if (!token) {
         console.error('Aborting: no CircleCI token provided.')
         process.exit(1)
