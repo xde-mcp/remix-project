@@ -3,6 +3,7 @@ const express = require('express')
 const path = require('path')
 const fs = require('fs')
 const { execSync, spawn } = require('child_process')
+const axios = require('axios')
 
 const app = express()
 app.use(express.json())
@@ -53,8 +54,10 @@ app.post('/api/trigger', async (req, res) => {
     child.on('close', (code) => {
       const m = out.match(/https:\/\/app\.circleci\.com\/[\w\/-]+/)
       const url = m ? m[0] : undefined
-      if (code === 0) return res.json({ ok: true, url, output: out })
-      return res.status(500).json({ ok: false, url, output: out })
+      const pidm = out.match(/Pipeline id:\s*([a-f0-9-]+)/i)
+      const pipelineId = pidm ? pidm[1] : undefined
+      if (code === 0) return res.json({ ok: true, url, pipelineId, output: out })
+      return res.status(500).json({ ok: false, url, pipelineId, output: out })
     })
     return
   }
@@ -74,6 +77,71 @@ app.post('/api/trigger', async (req, res) => {
   }
 
   return res.status(400).json({ error: 'Invalid mode. Use local or remote.' })
+})
+
+// Resolve org/repo from git remote origin for building CircleCI UI links
+function resolveRepo() {
+  try {
+    const remote = execSync('git config --get remote.origin.url', { stdio: ['ignore', 'pipe', 'ignore'] })
+      .toString()
+      .trim()
+    const m = remote.match(/github\.com[:/]([^/]+)\/([^/]+?)(\.git)?$/i)
+    if (m) return { org: m[1], repo: m[2] }
+  } catch (_) {}
+  return { org: 'remix-project-org', repo: 'remix-project' }
+}
+
+// Poll CircleCI API for pipeline/workflow/job status
+app.get('/api/ci-status', async (req, res) => {
+  const token = process.env.CIRCLECI_TOKEN || process.env.CIRCLE_TOKEN
+  if (!token) return res.status(401).json({ error: 'Missing CIRCLECI_TOKEN in env' })
+  const pipelineId = String(req.query.pipelineId || '').trim()
+  if (!pipelineId) return res.status(400).json({ error: 'pipelineId is required' })
+  const headers = { 'Circle-Token': token }
+  try {
+    const [pResp, wResp] = await Promise.all([
+      axios.get(`https://circleci.com/api/v2/pipeline/${pipelineId}`, { headers }),
+      axios.get(`https://circleci.com/api/v2/pipeline/${pipelineId}/workflow`, { headers })
+    ])
+    const pipeline = pResp.data || {}
+    const workflows = (wResp.data && wResp.data.items) || []
+    // Fetch jobs per workflow (best-effort)
+    const jobsByWf = {}
+    await Promise.all(
+      workflows.map(async (wf) => {
+        try {
+          const jr = await axios.get(`https://circleci.com/api/v2/workflow/${wf.id}/job`, { headers })
+          jobsByWf[wf.id] = (jr.data && jr.data.items) || []
+        } catch (_) {
+          jobsByWf[wf.id] = []
+        }
+      })
+    )
+
+    const termStates = new Set(['success', 'failed', 'canceled', 'error'])
+    const counts = workflows.reduce((acc, wf) => {
+      const s = (wf.status || 'unknown').toLowerCase()
+      acc[s] = (acc[s] || 0) + 1
+      return acc
+    }, {})
+    const allDone = workflows.length > 0 && workflows.every((wf) => termStates.has((wf.status || '').toLowerCase()))
+    const { org, repo } = resolveRepo()
+    const uiUrl = pipeline.number
+      ? `https://app.circleci.com/pipelines/github/${org}/${repo}/${pipeline.number}`
+      : undefined
+
+    res.json({
+      pipeline: { id: pipelineId, number: pipeline.number, state: pipeline.state, project_slug: pipeline.project_slug },
+      workflows,
+      jobsByWf,
+      summary: { counts, total: workflows.length, done: allDone },
+      uiUrl
+    })
+  } catch (e) {
+    const status = e.response && e.response.status
+    const data = e.response && e.response.data
+    res.status(status || 500).json({ error: 'Failed to fetch CI status', details: data || e.message })
+  }
 })
 
 const PORT = Number(process.env.SELECT_TEST_PORT || 5178)

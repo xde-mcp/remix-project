@@ -131,6 +131,39 @@
           log.appendChild(document.createElement('br'))
           log.scrollTop = log.scrollHeight
         }
+
+        // If remote, start polling for CI status
+        if (mode === 'remote' && j.pipelineId) {
+          await pollCi(j.pipelineId)
+        }
+      }
+
+      async function pollCi(pipelineId) {
+        const pad = (s) => (s || 'unknown').toString().padEnd(10, ' ')
+        const sleep = (ms) => new Promise(r => setTimeout(r, ms))
+        log.textContent += `pipeline: ${pipelineId} -> fetching status...\n`
+        log.scrollTop = log.scrollHeight
+        let done = false
+        while (!done) {
+          try {
+            const r = await fetch(`/api/ci-status?pipelineId=${encodeURIComponent(pipelineId)}`)
+            const j = await r.json()
+            if (!r.ok) throw new Error(j && j.details || 'status error')
+            const wfLines = (j.workflows || []).map(wf => `  - ${wf.name}  ${pad(wf.status)}  (id ${wf.id})`).join('\n')
+            const counts = j.summary && j.summary.counts ? JSON.stringify(j.summary.counts) : '{}'
+            const ui = j.uiUrl ? `\n  ${j.uiUrl}\n` : '\n'
+            log.textContent += `status: pipeline ${j.pipeline.number || ''} state=${j.pipeline.state} workflows=${counts}${ui}${wfLines}\n`
+            log.scrollTop = log.scrollHeight
+            done = Boolean(j.summary && j.summary.done)
+            if (!done) await sleep(5000)
+          } catch (e) {
+            log.textContent += `status error: ${e.message}\n`
+            log.scrollTop = log.scrollHeight
+            await sleep(7000)
+          }
+        }
+        log.textContent += `pipeline complete.\n`
+        log.scrollTop = log.scrollHeight
       }
 
       filter.oninput = render
