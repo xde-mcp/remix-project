@@ -348,7 +348,7 @@ workflows:
               job: ["nogroup"]
               jobsize: ["1"]
               parallelism: [1]
-              scriptparameter: [<< pipeline.parameters.run_file_tests >>]
+              scriptparameter: ["<< pipeline.parameters.run_file_tests >>"]
 
   run_pr_tests:
     when: << pipeline.parameters.run_pr_tests >>

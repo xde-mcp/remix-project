@@ -5,10 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "prebuild": "node ../generate-tests-json.js",
+    "prebuild": "node generate-tests-json.cjs",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "serve": "node proxy-server.cjs"
   },
   "dependencies": {
     "react": "^19.1.1",

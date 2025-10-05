@@ -12,7 +12,7 @@ const { spawn } = require('child_process')
 
 const app = express()
 
-const projectRoot = path.resolve(__dirname, '../../../../')
+const projectRoot = path.resolve(__dirname, '../../')
 
 // Load .env.local or .env if they exist (for CIRCLECI_TOKEN)
 try {
@@ -51,8 +51,8 @@ app.use((req, res, next) => {
 
 app.use(express.json())
 
-// Serve static files from web-ui/dist
-app.use(express.static(path.join(__dirname, 'web-ui/dist')))
+// Serve static files from dist
+app.use(express.static(path.join(__dirname, 'dist')))
 
 // Get current git branch
 function getCurrentBranch() {
@@ -81,8 +81,8 @@ app.post('/api/trigger', async (req, res) => {
 
   console.log(`[Trigger] Test: ${test}, Browser: ${browser}`)
 
-  // Use the existing trigger-circleci.js script
-  const triggerPath = path.resolve(__dirname, './trigger-circleci.js')
+  // Use the existing trigger-circleci.cjs script
+  const triggerPath = path.resolve(__dirname, './trigger-circleci.cjs')
   const child = spawn('node', [triggerPath, '--pattern', test], {
     cwd: projectRoot, // Run from project root so it can find node_modules
     env: process.env
@@ -193,7 +193,7 @@ app.post('/api/circleci/*', async (req, res) => {
 
 // SPA fallback
 app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'web-ui/dist/index.html'))
+  res.sendFile(path.join(__dirname, 'dist/index.html'))
 })
 
 const PORT = Number(process.env.PORT || 5178)

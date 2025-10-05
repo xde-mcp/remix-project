@@ -8,9 +8,9 @@
 const fs = require('fs')
 const path = require('path')
 
-const projectRoot = path.resolve(__dirname, '../../../../')
+const projectRoot = path.resolve(__dirname, '../../')
 const testsDir = path.resolve(projectRoot, 'apps/remix-ide-e2e/src/tests')
-const outputFile = path.resolve(__dirname, 'web-ui/public/tests.json')
+const outputFile = path.resolve(__dirname, 'public/tests.json')
 
 function findTests() {
   const tests = []

@@ -2,7 +2,18 @@
 
 set -e
 
-TESTFILES=$(grep -IRiL "\'@disabled\': \?true" "dist/apps/remix-ide-e2e/src/tests" | awk -F/ '{print $NF}' | sed 's/\.[tj]s$//' | grep -i "${4}" | while read base; do grep -IRi "${base}\.[tj]s$" dist/apps/remix-ide-e2e/src/tests; done | sort)
+echo "=== singletest.sh Debug Info ==="
+echo "Parameter 1 (browser):       '$1'"
+echo "Parameter 2 (jobsize):       '$2'"
+echo "Parameter 3 (job):           '$3'"
+echo "Parameter 4 (scriptparameter): '$4'"
+echo "================================"
+
+TESTFILES=$(grep -IRiL "\'@disabled\': \?true" "dist/apps/remix-ide-e2e/src/tests" | awk -F/ '{print $NF}' | sed 's/\.[tj]s$//' | grep -i "${4}" | while read base; do find dist/apps/remix-ide-e2e/src/tests -type f -name "${base}.[tj]s"; done | sort)
+
+echo "=== Test Files Found ==="
+echo "$TESTFILES"
+echo "========================="
 
 # count test files
 fileCount=$(echo "$TESTFILES" | wc -l)

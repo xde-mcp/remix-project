@@ -17,7 +17,7 @@ module.exports = {
     before: function (browser: NightwatchBrowser, done: VoidFunction) {
         init(browser, done, 'http://127.0.0.1:8080', false, null, true)
     },
-    'Should load the test file #group1': function (browser: NightwatchBrowser) {
+    'Should load the test file #group1 #flaky': function (browser: NightwatchBrowser) {
         browser.openFile('contracts')
             .addFile('contracts/3_BallotHover.sol', {
                 content: BallotWithARefToOwner

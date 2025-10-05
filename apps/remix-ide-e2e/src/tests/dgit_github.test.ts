@@ -12,7 +12,7 @@ module.exports = {
       done()
     })
   },
-  'Update settings for git #group1 #group2': function (browser: NightwatchBrowser) {
+  'Update settings for git #pr #group1 #group2': function (browser: NightwatchBrowser) {
     browser.
       clickLaunchIcon('dgit')
       .pause(1000)
