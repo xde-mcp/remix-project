@@ -82,3 +82,4 @@ apps/remix-ide-e2e/tmp/
 
 # IDE - Cursor
 .cursor/
+apps/circle-ci/public/tests.json

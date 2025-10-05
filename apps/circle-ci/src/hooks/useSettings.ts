@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 
 interface Settings {
   filter?: string
+  sortBy?: string
   mode?: string
   browser?: string
   layout?: string

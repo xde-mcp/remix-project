@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from './api'
 import { TestTable } from './components/TestTable'
-import { ControlPanel } from './components/ControlPanel'
+import { ControlPanel, type SortOption } from './components/ControlPanel'
 import { LogPanel } from './components/LogPanel'
 import { CIPipelineDetails } from './components/CIPipelineDetails'
 import { useSettings } from './hooks/useSettings'
@@ -21,6 +21,7 @@ function App() {
   const [isRefreshingTests, setIsRefreshingTests] = useState(false)
 
   const filter = settings.filter || ''
+  const sortBy = (settings.sortBy || 'name-asc') as SortOption
   const darkMode = settings.darkMode ?? true
 
   const appendLog = useCallback((message: string) => {
@@ -65,8 +66,22 @@ function App() {
     t.base.toLowerCase().includes(filter.toLowerCase())
   )
 
-  const favoriteTests = filteredTests.filter(t => favorites.has(t.base))
-  const regularTests = filteredTests
+  // Sort tests based on sortBy option
+  const sortedTests = [...filteredTests].sort((a, b) => {
+    if (sortBy === 'name-asc') {
+      return a.base.localeCompare(b.base)
+    } else if (sortBy === 'name-desc') {
+      return b.base.localeCompare(a.base)
+    } else if (sortBy === 'date-newest') {
+      return b.mtime - a.mtime
+    } else if (sortBy === 'date-oldest') {
+      return a.mtime - b.mtime
+    }
+    return 0
+  })
+
+  const favoriteTests = sortedTests.filter(t => favorites.has(t.base))
+  const regularTests = sortedTests
 
   const handleRunTest = async (testName: string) => {
     appendLog(`\n> triggering ${testName} on CircleCI (chrome)...`)
@@ -142,6 +157,8 @@ function App() {
       <ControlPanel
         filter={filter}
         onFilterChange={(value) => updateSettings({ filter: value })}
+        sortBy={sortBy}
+        onSortChange={(value) => updateSettings({ sortBy: value })}
         darkMode={darkMode}
         onDarkModeChange={(d) => updateSettings({ darkMode: d })}
         onSetToken={handleSetToken}
@@ -153,7 +170,7 @@ function App() {
         {/* Left Panel - Tests */}
         <div className="panel panel-tests">
           <div className="panel-header">
-            <h5>Tests ({filteredTests.length})</h5>
+            <h5>Tests ({sortedTests.length})</h5>
           </div>
           <div className="panel-content">
             {favoriteTests.length > 0 && (

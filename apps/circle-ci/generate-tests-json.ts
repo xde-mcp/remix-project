@@ -21,6 +21,7 @@ interface Test {
   src: string
   dist: string
   hasDist: boolean
+  mtime: number
 }
 
 function findTests(): Test[] {
@@ -45,11 +46,13 @@ function findTests(): Test[] {
     const isDisabled = /@disabled\s*:\s*true/i.test(content)
     
     if (!isDisabled) {
+      const stats = fs.statSync(srcPath)
       tests.push({
         base,
         src: srcPath,
         dist: distPath,
-        hasDist: fs.existsSync(distPath)
+        hasDist: fs.existsSync(distPath),
+        mtime: stats.mtimeMs
       })
     }
   }

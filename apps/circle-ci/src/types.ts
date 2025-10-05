@@ -3,6 +3,7 @@ export interface Test {
   src: string
   dist: string
   hasDist: boolean
+  mtime: number
 }
 
 export interface StatusResponse {
