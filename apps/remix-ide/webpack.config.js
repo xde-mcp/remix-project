@@ -95,6 +95,10 @@ module.exports = composePlugins(withNx(), withReact(), (config) => {
 
   config.resolve.alias = {
     ...config.resolve.alias,
+    // Prevent webpack from bundling monaco-editor ESM (88MB!) - we load it via AMD/CDN
+    // This stub is only for webpack to resolve type imports
+    // The real editor is loaded via loader.config() in remix-ui-editor.tsx
+    'monaco-editor': path.resolve(__dirname, './src/monaco-stub.js')
     // 'rust-verkle-wasm$': path.resolve(__dirname, '../../node_modules/rust-verkle-wasm/web/run_verkle_wasm.js')
   }
 
@@ -127,7 +131,13 @@ module.exports = composePlugins(withNx(), withReact(), (config) => {
       url: ['url', 'URL'],
       process: 'process/browser'
     })
-    //,new BundleAnalyzerPlugin()
+    //,new BundleAnalyzerPlugin({
+    //  analyzerMode: 'static',
+    //  reportFilename: 'bundle-report.html',
+    //  openAnalyzer: false,
+    //  generateStatsFile: true,
+    //  statsFilename: 'bundle-stats.json'
+    //})
   )
 
   // set the define plugin to load the WALLET_CONNECT_PROJECT_ID
