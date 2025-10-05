@@ -15,6 +15,9 @@ parameters:
   run_flaky_tests:
     type: boolean
     default: false
+  run_build_only:
+    type: boolean
+    default: false
   resource_class:
     type: enum
     enum: ["small", "medium", "medium+", "large", "xlarge", "2xlarge"]
@@ -328,6 +331,11 @@ jobs:
       - run: ./apps/remix-ide/ci/deploy_from_travis_remix-<< parameters.script >>.sh
     
 workflows:
+
+  run_build_only:
+    when: << pipeline.parameters.run_build_only >>
+    jobs:
+      - build
 
   run_file_tests:
     when: << pipeline.parameters.run_file_tests >>
