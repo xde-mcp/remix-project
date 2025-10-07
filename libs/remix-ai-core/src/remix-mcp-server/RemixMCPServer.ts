@@ -464,9 +464,9 @@ export class RemixMCPServer extends EventEmitter implements IRemixMCPServer {
       console.log(`Registered ${deploymentTools.length} deployment tools`, 'info');
 
       // Register debugging tools
-      // const debuggingTools = createDebuggingTools();
-      // this._tools.registerBatch(debuggingTools);
-      // console.log(`Registered ${debuggingTools.length} debugging tools`, 'info');
+      const debuggingTools = createDebuggingTools();
+      this._tools.registerBatch(debuggingTools);
+      console.log(`Registered ${debuggingTools.length} debugging tools`, 'info');
 
       const totalTools = this._tools.list().length;
       console.log(`Total tools registered: ${totalTools}`, 'info');
