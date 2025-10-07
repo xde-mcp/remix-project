@@ -6,7 +6,7 @@ import { Plugin } from '@remixproject/engine'
 import * as packageJson from '../../../../../package.json'
 import { PluginViewWrapper } from '@remix-ui/helper'
 
-import { fetchAndLoadTypes } from './type-fetcher'
+import { startTypeLoadingProcess } from './type-fetcher'
 
 const EventManager = require('../../lib/events')
 
@@ -76,6 +76,8 @@ export default class Editor extends Plugin {
 
     this.monaco = null
     this.typeLoaderDebounce = null
+
+    this.tsModuleMappings = {}
   }
 
   setDispatch (dispatch) {
@@ -144,9 +146,10 @@ export default class Editor extends Plugin {
       
       tsDefaults.setCompilerOptions({
         moduleResolution: this.monaco.languages.typescript.ModuleResolutionKind.NodeJs,
-        typeRoots: ["file:///node_modules/@types", "file:///node_modules"],
         target: this.monaco.languages.typescript.ScriptTarget.ES2020,
         allowNonTsExtensions: true,
+        baseUrl: 'file:///node_modules/',
+        paths: {}
       })
     })
     this.on('sidePanel', 'focusChanged', (name) => {
@@ -177,6 +180,26 @@ export default class Editor extends Plugin {
     this.off('sidePanel', 'pluginDisabled')
   }
 
+  updateTsCompilerOptions() {
+    console.log('[Module Mapper] Updating TS compiler options with new paths:', this.tsModuleMappings)
+    const tsDefaults = this.monaco.languages.typescript.typescriptDefaults
+    const oldOptions = tsDefaults.getCompilerOptions()
+    
+    const newOptions = {
+      ...oldOptions,
+      baseUrl: 'file:///node_modules/',
+      paths: this.tsModuleMappings
+    }
+
+    console.log('[DEBUG 3] Updating TS compiler with new options:', JSON.stringify(newOptions, null, 2))
+    tsDefaults.setCompilerOptions(newOptions)
+    
+    setTimeout(() => {
+      const allLibs = tsDefaults.getExtraLibs()
+      console.log('[DEBUG 4] Final check - Monaco extraLibs state:', Object.keys(allLibs).length, 'libs loaded.')
+    }, 2000)
+  }
+
   async _onChange (file) {
     this.triggerEvent('didChangeFile', [file])
     
@@ -189,14 +212,48 @@ export default class Editor extends Plugin {
         const code = model.getValue()
         
         try {
-          const npmImports = [...code.matchAll(/from\s+['"]((?![./]).+)['"]/g)].map(match => match[1])
-          const uniquePackages = [...new Set(npmImports)]
-          
-          if (uniquePackages.length > 0) {
-            await Promise.all(uniquePackages.map(pkg => fetchAndLoadTypes(pkg, this.monaco)))
-            const tsDefaults = this.monaco.languages.typescript.typescriptDefaults
-            tsDefaults.setCompilerOptions(tsDefaults.getCompilerOptions())
+
+          const extractPackageName = (importPath) => {
+            if (importPath.startsWith('@')) {
+              const parts = importPath.split('/')
+              return `${parts[0]}/${parts[1]}`
+            }
+            return importPath.split('/')[0]
           }
+
+          const rawImports = [...code.matchAll(/from\s+['"]((?![./]).*?)['"]/g)].map(match => match[1])
+          
+          const uniquePackages = [...new Set(rawImports.map(extractPackageName))]
+          console.log('[DEBUG 1] Extracted Package Names:', uniquePackages)
+          const newPackages = uniquePackages.filter(p => !this.tsModuleMappings[p])
+          if (newPackages.length === 0) return
+
+          console.log('[Module Mapper] New packages detected:', newPackages)
+
+          let newPathsFound = false
+          const promises = newPackages.map(async (pkg) => {
+            try {
+              const path = await startTypeLoadingProcess(pkg, this.monaco)
+              if (path && typeof path === 'string') {
+                const relativePath = path.replace('file:///node_modules/', '')
+                const dirPath = relativePath.substring(0, relativePath.lastIndexOf('/') + 1)
+                
+                this.tsModuleMappings[pkg] = [dirPath]
+                this.tsModuleMappings[`${pkg}/*`] = [`${pkg}/*`]
+                
+                newPathsFound = true
+              }
+            } catch (error) {
+              console.error(`[Module Mapper] Failed to process types for ${pkg}`, error)
+            }
+          })
+          
+          await Promise.all(promises)
+
+          if (newPathsFound) {
+            setTimeout(() => this.updateTsCompilerOptions(), 1000)
+          }
+
         } catch (error) {
           console.error('[Type Loader] Error during type loading process:', error)
         }
