@@ -236,9 +236,13 @@ export default class Editor extends Plugin {
               const result = await startTypeLoadingProcess(pkg, this.monaco)
               
               if (result && result.virtualPath) {
-                this.tsModuleMappings[pkg] = [`${pkg}/`]
-                this.tsModuleMappings[`${pkg}/*`] = [`${pkg}/*`]
+                // this.tsModuleMappings[pkg] = [`${pkg}/`]
+                // this.tsModuleMappings[`${pkg}/*`] = [`${pkg}/*`]
+                const typeFileRelativePath = result.virtualPath.replace('file:///node_modules/', '')
                 
+                this.tsModuleMappings[pkg] = [typeFileRelativePath]
+                this.tsModuleMappings[`${pkg}/*`] = [`${pkg}/*`]
+
                 newPathsFound = true
               }
             } catch (error) {

@@ -32,9 +32,11 @@ export async function startTypeLoadingProcess(packageName: string, monaco: Monac
   try {
     return await loadTypesInBackground(packageName, monaco)
   } catch (error) {
-    if (error instanceof NoTypesError) {
+    if (error.message.includes('No type definition') || error.message.includes('Failed to fetch any type definition')) {
       console.warn(`[Type Fetcher] No types found for "${packageName}". Reason:`, error.message)
       const typesPackageName = getTypesPackageName(packageName)
+      if (packageName === typesPackageName) return
+
       console.log(`[Type Fetcher] Trying ${typesPackageName} as a fallback...`)
       return startTypeLoadingProcess(typesPackageName, monaco)
     } else {
@@ -49,9 +51,15 @@ async function resolveAndFetchDts(resolvedUrl: string): Promise<{ finalUrl: stri
   
   if (/\.(m|c)?js$/.test(urlWithoutTrailingSlash)) {
     attempts.push(urlWithoutTrailingSlash.replace(/\.(m|c)?js$/, '.d.ts'))
-  } else if (!urlWithoutTrailingSlash.endsWith('.d.ts')) {
+    attempts.push(urlWithoutTrailingSlash.replace(/\.(m|c)?js$/, '.d.mts'))
+    attempts.push(urlWithoutTrailingSlash.replace(/\.(m|c)?js$/, '.d.cts'))
+  } else if (!/\.d\.(m|c)?ts$/.test(urlWithoutTrailingSlash)) {
     attempts.push(`${urlWithoutTrailingSlash}.d.ts`)
+    attempts.push(`${urlWithoutTrailingSlash}.d.mts`)
+    attempts.push(`${urlWithoutTrailingSlash}.d.cts`)
     attempts.push(`${urlWithoutTrailingSlash}/index.d.ts`)
+    attempts.push(`${urlWithoutTrailingSlash}/index.d.mts`)
+    attempts.push(`${urlWithoutTrailingSlash}/index.d.cts`)
   } else {
     attempts.push(urlWithoutTrailingSlash)
   }
@@ -82,14 +90,34 @@ async function loadTypesInBackground(packageName: string, monaco: Monaco): Promi
   const typePathsToFetch = new Set<string>()
 
   const hasExports = typeof packageJson.exports === 'object' && packageJson.exports !== null
-  console.log(`[Type Fetcher DBG] 'hasExports' field detected: ${hasExports}`)
+  console.log(`[Type Fetcher DBG] 'exports' field detected: ${hasExports}`)
 
   if (hasExports) {
     for (const key in packageJson.exports) {
+      if (key.includes('*') || key.endsWith('package.json')) continue
+
       const entry = packageJson.exports[key]
-      if (typeof entry === 'object' && entry !== null && typeof entry.types === 'string') {
-        console.log(`[Type Fetcher DBG] Found types in exports['${key}']: ${entry.types}`)
-        typePathsToFetch.add(entry.types)
+      
+      let typePath: string | null = null
+
+      if (typeof entry === 'string') {
+        if (!entry.endsWith('.json')) {
+          typePath = entry.replace(/\.(m|c)?js$/, '.d.ts')
+        }
+      } else if (typeof entry === 'object' && entry !== null) {
+        if (typeof entry.types === 'string') {
+          typePath = entry.types
+        } 
+        else if (typeof entry.import === 'string') {
+          typePath = entry.import.replace(/\.(m|c)?js$/, '.d.ts')
+        } else if (typeof entry.default === 'string') {
+          typePath = entry.default.replace(/\.(m|c)?js$/, '.d.ts')
+        }
+      }
+
+      if (typePath) {
+        console.log(`[Type Fetcher DBG] Found type path for exports['${key}']: ${typePath}`)
+        typePathsToFetch.add(typePath)
       }
     }
   }
@@ -102,7 +130,15 @@ async function loadTypesInBackground(packageName: string, monaco: Monaco): Promi
 
   console.log(`[Type Fetcher DBG] Total type paths found: ${typePathsToFetch.size}`)
   if (typePathsToFetch.size === 0) {
-    throw new NoTypesError(`No type definition entry found in package.json.`)
+    const mainField = packageJson.main
+    if (typeof mainField === 'string') {
+      console.log(`[Type Fetcher DBG] Inferring from 'main' field: ${mainField}`)
+      typePathsToFetch.add(mainField.replace(/\.(m|c)?js$/, '.d.ts'))
+    }
+    
+    if (typePathsToFetch.size === 0) {
+       throw new NoTypesError(`No type definition entry found in package.json.`)
+    }
   }
 
   let mainVirtualPath = ''
@@ -127,7 +163,15 @@ async function loadTypesInBackground(packageName: string, monaco: Monaco): Promi
   
   if (packageJson.dependencies) {
     console.log(`[Type Fetcher] Found ${Object.keys(packageJson.dependencies).length} dependencies for ${packageName}. Fetching them...`)
-    Object.keys(packageJson.dependencies).forEach(dep => startTypeLoadingProcess(dep, monaco))
+    const depPromises = Object.keys(packageJson.dependencies).map(dep => {
+      try {
+        return startTypeLoadingProcess(dep, monaco)
+      } catch(e) {
+        console.warn(`[Type Fetcher] Failed to start loading types for dependency: ${dep}`, e.message)
+        return Promise.resolve()
+      }
+    })
+    await Promise.all(depPromises)
   }
   
   return { virtualPath: mainVirtualPath, hasExports }
