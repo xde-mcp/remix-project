@@ -19,7 +19,7 @@ function getTypesPackageName(packageName: string): string {
   return `@types/${packageName}`
 }
 
-export async function startTypeLoadingProcess(packageName: string, monaco: Monaco): Promise<string | void> {
+export async function startTypeLoadingProcess(packageName: string, monaco: Monaco): Promise<{ virtualPath: string; hasExports: boolean } | void> {
   if (NODE_BUILTINS.has(packageName)) {
     packageName = '@types/node'
   }
@@ -67,7 +67,7 @@ async function resolveAndFetchDts(resolvedUrl: string): Promise<{ finalUrl: stri
   throw new Error(`Could not resolve DTS file for ${resolvedUrl}`)
 }
 
-async function loadTypesInBackground(packageName: string, monaco: Monaco): Promise<string | void> {
+async function loadTypesInBackground(packageName: string, monaco: Monaco): Promise<{ virtualPath: string; hasExports: boolean } | void> {
   const baseUrl = `https://cdn.jsdelivr.net/npm/${packageName}/`
   const packageJsonUrl = `${baseUrl}package.json`
   const response = await fetch(packageJsonUrl)
@@ -77,74 +77,60 @@ async function loadTypesInBackground(packageName: string, monaco: Monaco): Promi
   const packageJson = await response.json()
   
   console.log(`[Type Fetcher] Fetched package.json for "${packageName}", version: ${packageJson.version}`)
-
   addLibToMonaco(`file:///node_modules/${packageName}/package.json`, JSON.stringify(packageJson), monaco)
 
-  let mainTypeFileRelativePath: string | undefined = undefined
-  const exports = packageJson.exports
+  const typePathsToFetch = new Set<string>()
 
-  if (typeof exports === 'object' && exports !== null) {
-    const mainExport = exports['.']
-    if (typeof mainExport === 'object' && mainExport !== null) {
-      if (typeof mainExport.types === 'string') mainTypeFileRelativePath = mainExport.types
-      else if (typeof mainExport.import === 'string') mainTypeFileRelativePath = mainExport.import
-      else if (typeof mainExport.default === 'string') mainTypeFileRelativePath = mainExport.default
-    } else if (typeof mainExport === 'string') {
-      mainTypeFileRelativePath = mainExport
-    }
-  }
-    
-  if (!mainTypeFileRelativePath) {
-      mainTypeFileRelativePath = packageJson.types || packageJson.typings
-  }
+  const hasExports = typeof packageJson.exports === 'object' && packageJson.exports !== null
+  console.log(`[Type Fetcher DBG] 'hasExports' field detected: ${hasExports}`)
 
-  if (!mainTypeFileRelativePath) {
-      throw new NoTypesError(`No 'types', 'typings', or 'exports' field found in package.json.`)
-  }
-
-  if (!mainTypeFileRelativePath.startsWith('./')) mainTypeFileRelativePath = './' + mainTypeFileRelativePath
-
-  const rootTypeFileUrl = new URL(mainTypeFileRelativePath, baseUrl).href
-  console.log('[DEBUG 2-1] Attempting to fetch main type file from URL:', rootTypeFileUrl)
-
-  const { finalUrl: finalRootUrl, content: rootContent } = await resolveAndFetchDts(rootTypeFileUrl)
-  const virtualPath = finalRootUrl.replace('https://cdn.jsdelivr.net/npm', 'file:///node_modules')
-  addLibToMonaco(virtualPath, rootContent, monaco)
-  console.log(`[Type Fetcher] Immediate load complete for ${packageName}'s main file.`);
-  
-  (async () => {
-    if (packageJson.dependencies) {
-      console.log(`[Type Fetcher] Found ${Object.keys(packageJson.dependencies).length} dependencies for ${packageName}. Fetching them...`)
-      Object.keys(packageJson.dependencies).forEach(dep => startTypeLoadingProcess(dep, monaco))
-    }
-
-    const queue = [{ url: finalRootUrl, content: rootContent }]
-    const processedUrls = new Set<string>([finalRootUrl])
-
-    while (queue.length > 0) {
-      const { url: currentFileUrl, content: currentFileContent } = queue.shift()!
-      const relativeImports = [...currentFileContent.matchAll(/(?:from|import)\s+['"]((?:\.\.?\/)[^'"]+)['"]/g)]
-
-      for (const match of relativeImports) {
-        const relativePath = match[1]
-        const resolvedUrl = new URL(relativePath, currentFileUrl).href
-
-        if (processedUrls.has(resolvedUrl)) continue
-        processedUrls.add(resolvedUrl)
-
-        try {
-          const { finalUrl, content } = await resolveAndFetchDts(resolvedUrl)
-          const newVirtualPath = finalUrl.replace('https://cdn.jsdelivr.net/npm', 'file:///node_modules')
-          if (!loadedLibs.has(newVirtualPath)) {
-            addLibToMonaco(newVirtualPath, content, monaco)
-            queue.push({ url: finalUrl, content })
-          }
-        } catch (error) {}
+  if (hasExports) {
+    for (const key in packageJson.exports) {
+      const entry = packageJson.exports[key]
+      if (typeof entry === 'object' && entry !== null && typeof entry.types === 'string') {
+        console.log(`[Type Fetcher DBG] Found types in exports['${key}']: ${entry.types}`)
+        typePathsToFetch.add(entry.types)
       }
     }
-  })()
+  }
 
-  return virtualPath
+  const mainTypePath = packageJson.types || packageJson.typings
+  console.log(`[Type Fetcher DBG] Top-level 'types' field: ${mainTypePath}`)
+  if (typeof mainTypePath === 'string') {
+    typePathsToFetch.add(mainTypePath)
+  }
+
+  console.log(`[Type Fetcher DBG] Total type paths found: ${typePathsToFetch.size}`)
+  if (typePathsToFetch.size === 0) {
+    throw new NoTypesError(`No type definition entry found in package.json.`)
+  }
+
+  let mainVirtualPath = ''
+  for (const relativePath of typePathsToFetch) {
+    let cleanPath = relativePath
+    if (!cleanPath.startsWith('./')) cleanPath = './' + cleanPath
+    
+    const fileUrl = new URL(cleanPath, baseUrl).href
+    try {
+      const { finalUrl, content } = await resolveAndFetchDts(fileUrl)
+      const virtualPath = finalUrl.replace('https://cdn.jsdelivr.net/npm', 'file:///node_modules')
+      addLibToMonaco(virtualPath, content, monaco)
+      if (!mainVirtualPath) mainVirtualPath = virtualPath
+    } catch (error) {
+      console.warn(`[Type Fetcher] Could not fetch sub-type file: ${fileUrl}`, error)
+    }
+  }
+  
+  if (!mainVirtualPath) throw new Error('Failed to fetch any type definition files.')
+
+  console.log(`[Type Fetcher] Completed fetching all type definitions for ${packageName}.`)
+  
+  if (packageJson.dependencies) {
+    console.log(`[Type Fetcher] Found ${Object.keys(packageJson.dependencies).length} dependencies for ${packageName}. Fetching them...`)
+    Object.keys(packageJson.dependencies).forEach(dep => startTypeLoadingProcess(dep, monaco))
+  }
+  
+  return { virtualPath: mainVirtualPath, hasExports }
 }
 
 function addLibToMonaco(filePath: string, content: string, monaco: Monaco) {

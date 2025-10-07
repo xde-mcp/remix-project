@@ -233,12 +233,10 @@ export default class Editor extends Plugin {
           let newPathsFound = false
           const promises = newPackages.map(async (pkg) => {
             try {
-              const path = await startTypeLoadingProcess(pkg, this.monaco)
-              if (path && typeof path === 'string') {
-                const relativePath = path.replace('file:///node_modules/', '')
-                const dirPath = relativePath.substring(0, relativePath.lastIndexOf('/') + 1)
-                
-                this.tsModuleMappings[pkg] = [dirPath]
+              const result = await startTypeLoadingProcess(pkg, this.monaco)
+              
+              if (result && result.virtualPath) {
+                this.tsModuleMappings[pkg] = [`${pkg}/`]
                 this.tsModuleMappings[`${pkg}/*`] = [`${pkg}/*`]
                 
                 newPathsFound = true
