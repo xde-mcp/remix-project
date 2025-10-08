@@ -1,184 +1,115 @@
+// type-fetcher.ts
 import { Monaco } from '@monaco-editor/react'
 
-const processedPackages = new Set<string>()
-const loadedLibs = new Set<string>()
-const NODE_BUILTINS = new Set(['util', 'events', 'buffer', 'stream', 'path', 'fs', 'os', 'crypto', 'http', 'https', 'url', 'zlib'])
+type Library = { filePath: string; content: string }
 
-class NoTypesError extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = 'NoTypesError'
-  }
-}
+const IMPORT_RE = /from\s*['"]((?!.*\.(css|json|svg))[^'"]+)['"]/g
 
-function getTypesPackageName(packageName: string): string {
-  if (packageName.startsWith('@')) {
-    const mangledName = packageName.substring(1).replace('/', '__');
-    return `@types/${mangledName}`
-  }
-  return `@types/${packageName}`
-}
+async function resolveAndFetch(url: string): Promise<{ finalUrl: string; content: string }> {
+  const basePath = url
+    .replace(/\.d\.ts$/, '')
+    .replace(/\.ts$/, '')
+    .replace(/\.d\.mts$/, '')
+    .replace(/\.mts$/, '')
+    .replace(/\.d\.cts$/, '')
+    .replace(/\.cts$/, '')
+    .replace(/\.js$/, '')
+    .replace(/\.mjs$/, '')
+    .replace(/\.cjs$/, '')
 
-export async function startTypeLoadingProcess(packageName: string, monaco: Monaco): Promise<{ virtualPath: string; hasExports: boolean } | void> {
-  if (NODE_BUILTINS.has(packageName)) {
-    packageName = '@types/node'
-  }
+  const attempts = [
+    `${basePath}.d.ts`,
+    `${basePath}.ts`,
+    `${basePath}.d.mts`,
+    `${basePath}.mts`,
+    `${basePath}.d.cts`,
+    `${basePath}.cts`,
+    `${basePath}/index.d.ts`,
+    `${basePath}/index.ts`,
+  ]
   
-  if (processedPackages.has(packageName)) return
-  processedPackages.add(packageName)
+  const uniqueAttempts = [...new Set(attempts)]
+  console.log(`[DIAGNOSE-RESOLVER] Attempting to resolve: ${url}. Trying:`, uniqueAttempts)
 
-  console.log(`[Type Fetcher] Starting type loading process for "${packageName}"...`)
-  
-  try {
-    return await loadTypesInBackground(packageName, monaco)
-  } catch (error) {
-    if (error.message.includes('No type definition') || error.message.includes('Failed to fetch any type definition')) {
-      console.warn(`[Type Fetcher] No types found for "${packageName}". Reason:`, error.message)
-      const typesPackageName = getTypesPackageName(packageName)
-      if (packageName === typesPackageName) return
-
-      console.log(`[Type Fetcher] Trying ${typesPackageName} as a fallback...`)
-      return startTypeLoadingProcess(typesPackageName, monaco)
-    } else {
-      console.error(`[Type Fetcher] Loading process failed for "${packageName}" and will not fallback to @types. Error:`, error.message)
-    }
-  }
-}
-
-async function resolveAndFetchDts(resolvedUrl: string): Promise<{ finalUrl: string; content: string }> {
-  const urlWithoutTrailingSlash = resolvedUrl.endsWith('/') ? resolvedUrl.slice(0, -1) : resolvedUrl
-  const attempts: string[] = []
-  
-  if (/\.(m|c)?js$/.test(urlWithoutTrailingSlash)) {
-    attempts.push(urlWithoutTrailingSlash.replace(/\.(m|c)?js$/, '.d.ts'))
-    attempts.push(urlWithoutTrailingSlash.replace(/\.(m|c)?js$/, '.d.mts'))
-    attempts.push(urlWithoutTrailingSlash.replace(/\.(m|c)?js$/, '.d.cts'))
-  } else if (!/\.d\.(m|c)?ts$/.test(urlWithoutTrailingSlash)) {
-    attempts.push(`${urlWithoutTrailingSlash}.d.ts`)
-    attempts.push(`${urlWithoutTrailingSlash}.d.mts`)
-    attempts.push(`${urlWithoutTrailingSlash}.d.cts`)
-    attempts.push(`${urlWithoutTrailingSlash}/index.d.ts`)
-    attempts.push(`${urlWithoutTrailingSlash}/index.d.mts`)
-    attempts.push(`${urlWithoutTrailingSlash}/index.d.cts`)
-  } else {
-    attempts.push(urlWithoutTrailingSlash)
-  }
-
-  for (const url of attempts) {
+  for (const attemptUrl of uniqueAttempts) {
     try {
-      const response = await fetch(url)
+      const response = await fetch(attemptUrl)
       if (response.ok) {
-        return { finalUrl: url, content: await response.text() }
+        console.log(`[DIAGNOSE-RESOLVER] ✅ Success for ${url} at ${attemptUrl}`)
+        return { finalUrl: attemptUrl, content: await response.text() }
       }
     } catch (e) {}
   }
-  throw new Error(`Could not resolve DTS file for ${resolvedUrl}`)
+  throw new Error(`Could not resolve type definition for ${url}`)
 }
 
-async function loadTypesInBackground(packageName: string, monaco: Monaco): Promise<{ virtualPath: string; hasExports: boolean } | void> {
+async function crawl(
+  entryUrl: string,
+  packageRootUrl: string,
+  depth: number,
+  maxDepth: number,
+  visited: Set<string>
+): Promise<Library[]> {
+  if (depth >= maxDepth || visited.has(entryUrl)) {
+    return []
+  }
+  visited.add(entryUrl)
+
+  const collectedLibs: Library[] = []
+  
+  try {
+    const { finalUrl, content } = await resolveAndFetch(entryUrl)
+    const virtualPath = finalUrl.replace('https://cdn.jsdelivr.net/npm/', 'file:///node_modules/')
+    collectedLibs.push({ filePath: virtualPath, content })
+
+    const subPromises: Promise<Library[]>[] = []
+    for (const match of content.matchAll(IMPORT_RE)) {
+      const importPath = match[1]
+      if (!importPath.startsWith('.')) continue
+      const nextUrl = new URL(importPath, finalUrl).href
+      subPromises.push(crawl(nextUrl, packageRootUrl, depth + 1, maxDepth, visited))
+    }
+
+    const results = await Promise.all(subPromises)
+    results.forEach(libs => collectedLibs.push(...libs))
+  } catch (e) {
+    console.warn(`[Crawler] Could not fetch/process ${entryUrl}, but continuing...`)
+  }
+  
+  return collectedLibs
+}
+
+export async function startTypeLoadingProcess(packageName: string): Promise<{ mainVirtualPath: string; libs: Library[] } | void> {
+  console.log(`[Type Loader] Starting JSDELIVR Limited Depth Crawl for "${packageName}"...`)
   const baseUrl = `https://cdn.jsdelivr.net/npm/${packageName}/`
-  const packageJsonUrl = `${baseUrl}package.json`
-  const response = await fetch(packageJsonUrl)
-
-  if (!response.ok) throw new Error(`Failed to fetch package.json for "${packageName}"`)
-
-  const packageJson = await response.json()
   
-  console.log(`[Type Fetcher] Fetched package.json for "${packageName}", version: ${packageJson.version}`)
-  addLibToMonaco(`file:///node_modules/${packageName}/package.json`, JSON.stringify(packageJson), monaco)
+  try {
+    const packageJsonUrl = new URL('package.json', baseUrl).href
+    const response = await fetch(packageJsonUrl)
+    if (!response.ok) throw new Error(`Failed to fetch package.json for "${packageName}"`)
 
-  const typePathsToFetch = new Set<string>()
+    const packageJson = await response.json()
+    const allCollectedLibs: Library[] = [{
+      filePath: `file:///node_modules/${packageName}/package.json`,
+      content: JSON.stringify(packageJson, null, 2),
+    }]
 
-  const hasExports = typeof packageJson.exports === 'object' && packageJson.exports !== null
-  console.log(`[Type Fetcher DBG] 'exports' field detected: ${hasExports}`)
-
-  if (hasExports) {
-    for (const key in packageJson.exports) {
-      if (key.includes('*') || key.endsWith('package.json')) continue
-
-      const entry = packageJson.exports[key]
-      
-      let typePath: string | null = null
-
-      if (typeof entry === 'string') {
-        if (!entry.endsWith('.json')) {
-          typePath = entry.replace(/\.(m|c)?js$/, '.d.ts')
-        }
-      } else if (typeof entry === 'object' && entry !== null) {
-        if (typeof entry.types === 'string') {
-          typePath = entry.types
-        } 
-        else if (typeof entry.import === 'string') {
-          typePath = entry.import.replace(/\.(m|c)?js$/, '.d.ts')
-        } else if (typeof entry.default === 'string') {
-          typePath = entry.default.replace(/\.(m|c)?js$/, '.d.ts')
-        }
-      }
-
-      if (typePath) {
-        console.log(`[Type Fetcher DBG] Found type path for exports['${key}']: ${typePath}`)
-        typePathsToFetch.add(typePath)
-      }
+    let mainTypePath = packageJson.types || packageJson.typings
+    if (!mainTypePath && typeof packageJson.exports === 'object' && packageJson.exports?.['.']?.types) {
+      mainTypePath = packageJson.exports['.'].types
     }
-  }
+    mainTypePath = mainTypePath || 'index.d.ts'
 
-  const mainTypePath = packageJson.types || packageJson.typings
-  console.log(`[Type Fetcher DBG] Top-level 'types' field: ${mainTypePath}`)
-  if (typeof mainTypePath === 'string') {
-    typePathsToFetch.add(mainTypePath)
-  }
+    const mainEntryUrl = new URL(mainTypePath, baseUrl).href
+    const visited = new Set<string>()
+    const libsFromCrawl = await crawl(mainEntryUrl, baseUrl, 0, 6, visited)
+    allCollectedLibs.push(...libsFromCrawl)
 
-  console.log(`[Type Fetcher DBG] Total type paths found: ${typePathsToFetch.size}`)
-  if (typePathsToFetch.size === 0) {
-    const mainField = packageJson.main
-    if (typeof mainField === 'string') {
-      console.log(`[Type Fetcher DBG] Inferring from 'main' field: ${mainField}`)
-      typePathsToFetch.add(mainField.replace(/\.(m|c)?js$/, '.d.ts'))
-    }
-    
-    if (typePathsToFetch.size === 0) {
-       throw new NoTypesError(`No type definition entry found in package.json.`)
-    }
-  }
+    const mainVirtualPath = libsFromCrawl.length > 0 ? libsFromCrawl[0].filePath : ''
+    console.log(`[Type Loader] Finished Crawl for "${packageName}". Total files collected: ${allCollectedLibs.length}.`)
 
-  let mainVirtualPath = ''
-  for (const relativePath of typePathsToFetch) {
-    let cleanPath = relativePath
-    if (!cleanPath.startsWith('./')) cleanPath = './' + cleanPath
-    
-    const fileUrl = new URL(cleanPath, baseUrl).href
-    try {
-      const { finalUrl, content } = await resolveAndFetchDts(fileUrl)
-      const virtualPath = finalUrl.replace('https://cdn.jsdelivr.net/npm', 'file:///node_modules')
-      addLibToMonaco(virtualPath, content, monaco)
-      if (!mainVirtualPath) mainVirtualPath = virtualPath
-    } catch (error) {
-      console.warn(`[Type Fetcher] Could not fetch sub-type file: ${fileUrl}`, error)
-    }
+    return { mainVirtualPath, libs: allCollectedLibs }
+  } catch (error) {
+    console.error(`[Type Loader] Failed to load types for "${packageName}":`, error.message)
   }
-  
-  if (!mainVirtualPath) throw new Error('Failed to fetch any type definition files.')
-
-  console.log(`[Type Fetcher] Completed fetching all type definitions for ${packageName}.`)
-  
-  if (packageJson.dependencies) {
-    console.log(`[Type Fetcher] Found ${Object.keys(packageJson.dependencies).length} dependencies for ${packageName}. Fetching them...`)
-    const depPromises = Object.keys(packageJson.dependencies).map(dep => {
-      try {
-        return startTypeLoadingProcess(dep, monaco)
-      } catch(e) {
-        console.warn(`[Type Fetcher] Failed to start loading types for dependency: ${dep}`, e.message)
-        return Promise.resolve()
-      }
-    })
-    await Promise.all(depPromises)
-  }
-  
-  return { virtualPath: mainVirtualPath, hasExports }
-}
-
-function addLibToMonaco(filePath: string, content: string, monaco: Monaco) {
-  if (loadedLibs.has(filePath)) return
-  monaco.languages.typescript.typescriptDefaults.addExtraLib(content, filePath)
-  loadedLibs.add(filePath)
 }

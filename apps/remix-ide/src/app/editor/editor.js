@@ -78,6 +78,7 @@ export default class Editor extends Plugin {
     this.typeLoaderDebounce = null
 
     this.tsModuleMappings = {}
+    this.processedPackages = new Set()
   }
 
   setDispatch (dispatch) {
@@ -142,15 +143,21 @@ export default class Editor extends Plugin {
     this.activated = true
     this.on('editor', 'editorMounted', () => {
       if (!this.monaco) return
-      const tsDefaults = this.monaco.languages.typescript.typescriptDefaults
+      const ts = this.monaco.languages.typescript
+      const tsDefaults = ts.typescriptDefaults
       
       tsDefaults.setCompilerOptions({
-        moduleResolution: this.monaco.languages.typescript.ModuleResolutionKind.NodeJs,
-        target: this.monaco.languages.typescript.ScriptTarget.ES2020,
+        moduleResolution: ts.ModuleResolutionKind.Bundler,
+        module: ts.ModuleKind.ESNext,
+        target: ts.ScriptTarget.ES2022,
+        lib: ['es2022', 'dom', 'dom.iterable'],
         allowNonTsExtensions: true,
+        allowSyntheticDefaultImports: true,
+        skipLibCheck: true,
         baseUrl: 'file:///node_modules/',
-        paths: {}
+        paths: this.tsModuleMappings,
       })
+      console.log('[DIAGNOSE-SETUP] Initial CompilerOptions set.')
     })
     this.on('sidePanel', 'focusChanged', (name) => {
       this.keepDecorationsFor(name, 'sourceAnnotationsPerFile')
@@ -181,23 +188,32 @@ export default class Editor extends Plugin {
   }
 
   updateTsCompilerOptions() {
-    console.log('[Module Mapper] Updating TS compiler options with new paths:', this.tsModuleMappings)
+    if (!this.monaco) return
+    console.log('[DIAGNOSE-PATHS] Updating TS compiler options...')
+    console.log('[DIAGNOSE-PATHS] Current path mappings:', JSON.stringify(this.tsModuleMappings, null, 2))
+    
     const tsDefaults = this.monaco.languages.typescript.typescriptDefaults
-    const oldOptions = tsDefaults.getCompilerOptions()
+    const currentOptions = tsDefaults.getCompilerOptions()
     
-    const newOptions = {
-      ...oldOptions,
-      baseUrl: 'file:///node_modules/',
-      paths: this.tsModuleMappings
-    }
-
-    console.log('[DEBUG 3] Updating TS compiler with new options:', JSON.stringify(newOptions, null, 2))
-    tsDefaults.setCompilerOptions(newOptions)
+    tsDefaults.setCompilerOptions({
+      ...currentOptions,
+      paths: { ...currentOptions.paths, ...this.tsModuleMappings }
+    })
+    console.log('[DIAGNOSE-PATHS] TS compiler options updated.')
+  }
+  
+  addExtraLibs(libs) {
+    if (!this.monaco || !libs || libs.length === 0) return
+    console.log(`[DIAGNOSE-LIBS] Adding ${libs.length} new files to Monaco...`)
     
-    setTimeout(() => {
-      const allLibs = tsDefaults.getExtraLibs()
-      console.log('[DEBUG 4] Final check - Monaco extraLibs state:', Object.keys(allLibs).length, 'libs loaded.')
-    }, 2000)
+    const tsDefaults = this.monaco.languages.typescript.typescriptDefaults
+    
+    libs.forEach(lib => {
+      if (!tsDefaults.getExtraLibs()[lib.filePath]) {
+        tsDefaults.addExtraLib(lib.content, lib.filePath)
+      }
+    })
+    console.log(`[DIAGNOSE-LIBS] Files added. Total extra libs now: ${Object.keys(tsDefaults.getExtraLibs()).length}.`)
   }
 
   async _onChange (file) {
@@ -210,58 +226,53 @@ export default class Editor extends Plugin {
         const model = this.monaco.editor.getModel(this.monaco.Uri.parse(file))
         if (!model) return
         const code = model.getValue()
-        
+
         try {
-
-          const extractPackageName = (importPath) => {
-            if (importPath.startsWith('@')) {
-              const parts = importPath.split('/')
-              return `${parts[0]}/${parts[1]}`
-            }
-            return importPath.split('/')[0]
-          }
-
-          const rawImports = [...code.matchAll(/from\s+['"]((?![./]).*?)['"]/g)].map(match => match[1])
-          
+          console.log('[DIAGNOSE-ONCHANGE] Change detected, analyzing imports...')
+          const extractPackageName = (p) => p.startsWith('@') ? p.split('/').slice(0, 2).join('/') : p.split('/')[0]
+          const rawImports = [...code.matchAll(/(?:from|import)\s+['"]((?!\.).*?)['"]/g)].map(match => match[1])
           const uniquePackages = [...new Set(rawImports.map(extractPackageName))]
-          console.log('[DEBUG 1] Extracted Package Names:', uniquePackages)
-          const newPackages = uniquePackages.filter(p => !this.tsModuleMappings[p])
-          if (newPackages.length === 0) return
-
-          console.log('[Module Mapper] New packages detected:', newPackages)
+          
+          const newPackages = uniquePackages.filter(p => !this.processedPackages.has(p))
+          if (newPackages.length === 0) {
+            console.log('[DIAGNOSE-ONCHANGE] No new packages to process.')
+            return
+          }
+          
+          console.log('[DIAGNOSE-ONCHANGE] New packages to process:', newPackages)
 
           let newPathsFound = false
           const promises = newPackages.map(async (pkg) => {
-            try {
-              const result = await startTypeLoadingProcess(pkg, this.monaco)
-              
-              if (result && result.virtualPath) {
-                // this.tsModuleMappings[pkg] = [`${pkg}/`]
-                // this.tsModuleMappings[`${pkg}/*`] = [`${pkg}/*`]
-                const typeFileRelativePath = result.virtualPath.replace('file:///node_modules/', '')
-                
-                this.tsModuleMappings[pkg] = [typeFileRelativePath]
-                this.tsModuleMappings[`${pkg}/*`] = [`${pkg}/*`]
+            this.processedPackages.add(pkg)
+            const result = await startTypeLoadingProcess(pkg)
+            
+            console.log(`[DIAGNOSE-ONCHANGE] Result received for "${pkg}":`, result ? { mainVirtualPath: result.mainVirtualPath, libsCount: result.libs.length } : 'null')
 
+            if (result && result.libs && result.libs.length > 0) {
+              this.addExtraLibs(result.libs)
+              
+              if (result.mainVirtualPath) {
+                this.tsModuleMappings[pkg] = [result.mainVirtualPath.replace('file:///node_modules/', '')]
+                this.tsModuleMappings[`${pkg}/*`] = [`${pkg}/*`]
                 newPathsFound = true
+              } else {
+                console.warn(`[DIAGNOSE-ONCHANGE] No mainVirtualPath found for "${pkg}", path mapping will be incomplete.`)
               }
-            } catch (error) {
-              console.error(`[Module Mapper] Failed to process types for ${pkg}`, error)
             }
           })
-          
           await Promise.all(promises)
 
           if (newPathsFound) {
-            setTimeout(() => this.updateTsCompilerOptions(), 1000)
+            this.updateTsCompilerOptions()
+          } else {
+            console.log('[DIAGNOSE-ONCHANGE] No new paths were mapped.')
           }
 
         } catch (error) {
-          console.error('[Type Loader] Error during type loading process:', error)
+          console.error('[DIAGNOSE-ONCHANGE] Error during type loading process:', error)
         }
       }, 1500)
     }
-
     const currentFile = await this.call('fileManager', 'file')
     if (!currentFile) {
       return
