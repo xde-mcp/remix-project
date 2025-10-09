@@ -79,6 +79,10 @@ export default class Editor extends Plugin {
 
     this.tsModuleMappings = {}
     this.processedPackages = new Set()
+
+    this.typesLoadingCount = 0
+    this.shimDisposers = new Map()
+    this.pendingPackagesBatch = new Set()
   }
 
   setDispatch (dispatch) {
@@ -147,8 +151,8 @@ export default class Editor extends Plugin {
       const tsDefaults = ts.typescriptDefaults
       
       tsDefaults.setCompilerOptions({
-        moduleResolution: ts.ModuleResolutionKind.Bundler,
-        module: ts.ModuleKind.ESNext,
+        moduleResolution: ts.ModuleResolutionKind.NodeNext,
+        module: ts.ModuleKind.NodeNext,
         target: ts.ScriptTarget.ES2022,
         lib: ['es2022', 'dom', 'dom.iterable'],
         allowNonTsExtensions: true,
@@ -157,7 +161,9 @@ export default class Editor extends Plugin {
         baseUrl: 'file:///node_modules/',
         paths: this.tsModuleMappings,
       })
-      console.log('[DIAGNOSE-SETUP] Initial CompilerOptions set.')
+      tsDefaults.setDiagnosticsOptions({ noSemanticValidation: false, noSyntaxValidation: false })
+      ts.typescriptDefaults.setEagerModelSync(true)
+      console.log('[DIAGNOSE-SETUP] CompilerOptions set to NodeNext and diagnostics enabled')
     })
     this.on('sidePanel', 'focusChanged', (name) => {
       this.keepDecorationsFor(name, 'sourceAnnotationsPerFile')
@@ -202,6 +208,67 @@ export default class Editor extends Plugin {
     console.log('[DIAGNOSE-PATHS] TS compiler options updated.')
   }
   
+  toggleTsDiagnostics(enable) {
+    if (!this.monaco) return
+    const ts = this.monaco.languages.typescript
+    ts.typescriptDefaults.setDiagnosticsOptions({
+      noSemanticValidation: !enable,
+      noSyntaxValidation: false
+    })
+    console.log(`[DIAGNOSE-DIAG] Semantic diagnostics ${enable ? 'enabled' : 'disabled'}`)
+  }
+
+  addShimForPackage(pkg) {
+    if (!this.monaco) return
+    const tsDefaults = this.monaco.languages.typescript.typescriptDefaults
+
+    const shimMainPath = `file:///__shims__/${pkg}.d.ts`
+    const shimWildPath = `file:///__shims__/${pkg}__wildcard.d.ts`
+
+    if (!this.shimDisposers.has(shimMainPath)) {
+      const d1 = tsDefaults.addExtraLib(`declare module '${pkg}' { const _default: any\nexport = _default }`, shimMainPath)
+      this.shimDisposers.set(shimMainPath, d1)
+    }
+
+    if (!this.shimDisposers.has(shimWildPath)) {
+      const d2 = tsDefaults.addExtraLib(`declare module '${pkg}/*' { const _default: any\nexport = _default }`, shimWildPath)
+      this.shimDisposers.set(shimWildPath, d2)
+    }
+
+    this.tsModuleMappings[pkg] = [shimMainPath.replace('file:///', '')]
+    this.tsModuleMappings[`${pkg}/*`] = [`${pkg}/*`]
+  }
+
+  removeShimsForPackage(pkg) {
+    const keys = [`file:///__shims__/${pkg}.d.ts`, `file:///__shims__/${pkg}__wildcard.d.ts`]
+    for (const k of keys) {
+      const disp = this.shimDisposers.get(k)
+      if (disp && typeof disp.dispose === 'function') {
+        disp.dispose()
+        this.shimDisposers.delete(k)
+      }
+    }
+  }
+
+  beginTypesBatch() {
+    if (this.typesLoadingCount === 0) {
+      this.toggleTsDiagnostics(false)
+      this.triggerEvent('typesLoading', ['start'])
+      console.log('[DIAGNOSE-BATCH] Types batch started')
+    }
+    this.typesLoadingCount++
+  }
+
+  endTypesBatch() {
+    this.typesLoadingCount = Math.max(0, this.typesLoadingCount - 1)
+    if (this.typesLoadingCount === 0) {
+      this.updateTsCompilerOptions()
+      this.toggleTsDiagnostics(true)
+      this.triggerEvent('typesLoading', ['end'])
+      console.log('[DIAGNOSE-BATCH] Types batch ended')
+    }
+  }
+
   addExtraLibs(libs) {
     if (!this.monaco || !libs || libs.length === 0) return
     console.log(`[DIAGNOSE-LIBS] Adding ${libs.length} new files to Monaco...`)
@@ -230,7 +297,11 @@ export default class Editor extends Plugin {
         try {
           console.log('[DIAGNOSE-ONCHANGE] Change detected, analyzing imports...')
           const extractPackageName = (p) => p.startsWith('@') ? p.split('/').slice(0, 2).join('/') : p.split('/')[0]
-          const rawImports = [...code.matchAll(/(?:from|import)\s+['"]((?!\.).*?)['"]/g)].map(match => match[1])
+          const IMPORT_ANY_RE =
+            /(?:import|export)\s+[^'"]*?from\s*['"]([^'"]+)['"]|import\s*['"]([^'"]+)['"]|require\(\s*['"]([^'"]+)['"]\s*\)/g
+          const rawImports = [...code.matchAll(IMPORT_ANY_RE)]
+            .map(m => (m[1] || m[2] || m[3] || '').trim())
+            .filter(Boolean)
           const uniquePackages = [...new Set(rawImports.map(extractPackageName))]
           
           const newPackages = uniquePackages.filter(p => !this.processedPackages.has(p))
@@ -241,33 +312,84 @@ export default class Editor extends Plugin {
           
           console.log('[DIAGNOSE-ONCHANGE] New packages to process:', newPackages)
 
-          let newPathsFound = false
-          const promises = newPackages.map(async (pkg) => {
-            this.processedPackages.add(pkg)
-            const result = await startTypeLoadingProcess(pkg)
-            
-            console.log(`[DIAGNOSE-ONCHANGE] Result received for "${pkg}":`, result ? { mainVirtualPath: result.mainVirtualPath, libsCount: result.libs.length } : 'null')
+          for (const pkg of newPackages) {
+            this.addShimForPackage(pkg)
+          }
+          this.updateTsCompilerOptions()
 
-            if (result && result.libs && result.libs.length > 0) {
-              this.addExtraLibs(result.libs)
-              
-              if (result.mainVirtualPath) {
-                this.tsModuleMappings[pkg] = [result.mainVirtualPath.replace('file:///node_modules/', '')]
+          this.beginTypesBatch()
+
+          let newPathsFound = false
+          await Promise.all(newPackages.map(async (pkg) => {
+            try {
+              this.processedPackages.add(pkg)
+
+              const result = await startTypeLoadingProcess(pkg)
+              console.log(`[DIAGNOSE-ONCHANGE] Result received for "${pkg}":`, result ? { mainVirtualPath: result.mainVirtualPath, libsCount: result.libs.length } : 'null')
+
+              if (result && result.libs && result.libs.length > 0) {
+                this.addExtraLibs(result.libs)
+
+                function cleanupBadPathKeys(paths, pkg) {
+                  for (const k of Object.keys(paths)) {
+                    const badDot = k.startsWith(`${pkg}.`)
+                    const noSlash = k.startsWith(pkg) && !k.includes('/') && k !== pkg
+                    if (badDot || noSlash) delete paths[k]
+                  }
+                }
+
+                cleanupBadPathKeys(this.tsModuleMappings, pkg)
+
+                if (result.subpathMap) {
+                  if (result.subpathMap) {
+                    for (const [subpath, virtualPath] of Object.entries(result.subpathMap)) {
+                      this.tsModuleMappings[subpath] = [virtualPath]
+                    }
+                  }
+                }
+
+                if (result.mainVirtualPath) {
+                  this.tsModuleMappings[pkg] = [result.mainVirtualPath.replace('file:///node_modules/', '')]
+                } else {
+                  console.warn(`[DIAGNOSE-ONCHANGE] No mainVirtualPath found for "${pkg}", path mapping may be incomplete`)
+                }
+
                 this.tsModuleMappings[`${pkg}/*`] = [`${pkg}/*`]
+
+                const libsForPkg = result.libs.filter(l => l.filePath.includes(`/node_modules/${pkg}/`))
+                for (const lib of libsForPkg) {
+                  const asPath = lib.filePath.replace('file:///node_modules/', '')
+                  if (asPath.endsWith('/index.d.ts')) {
+                    const dirSpec = asPath.replace('/index.d.ts', '')
+                    if (dirSpec.startsWith(`${pkg}/`)) {
+                      this.tsModuleMappings[dirSpec] = [asPath]
+                    }
+                  }
+                  if (asPath.endsWith('.d.ts')) {
+                    const fileSpec = asPath.replace(/\.d\.ts$/, '')
+                    if (fileSpec.startsWith(`${pkg}/`)) {
+                      this.tsModuleMappings[fileSpec] = [asPath]
+                    }
+                  }
+                }
+
+                this.removeShimsForPackage(pkg)
                 newPathsFound = true
               } else {
-                console.warn(`[DIAGNOSE-ONCHANGE] No mainVirtualPath found for "${pkg}", path mapping will be incomplete.`)
+                console.warn(`[DIAGNOSE-ONCHANGE] No types found for "${pkg}", keeping shim`)
               }
+            } catch (e) {
+              console.error('[DIAGNOSE-ONCHANGE] Type load failed for', pkg, e)
             }
-          })
-          await Promise.all(promises)
+          }))
 
-          if (newPathsFound) {
-            this.updateTsCompilerOptions()
-          } else {
-            console.log('[DIAGNOSE-ONCHANGE] No new paths were mapped.')
-          }
+        if (newPathsFound) {
+          this.updateTsCompilerOptions()
+        } else {
+          console.log('[DIAGNOSE-ONCHANGE] No new paths were mapped.')
+        }
 
+        this.endTypesBatch()
         } catch (error) {
           console.error('[DIAGNOSE-ONCHANGE] Error during type loading process:', error)
         }
