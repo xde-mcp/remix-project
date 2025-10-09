@@ -295,125 +295,82 @@ export default class Editor extends Plugin {
         const code = model.getValue()
 
         try {
-          console.log('[DIAGNOSE-ONCHANGE] Change detected, analyzing imports...')
-          const extractPackageName = (p) => p.startsWith('@') ? p.split('/').slice(0, 2).join('/') : p.split('/')[0]
           const IMPORT_ANY_RE =
             /(?:import|export)\s+[^'"]*?from\s*['"]([^'"]+)['"]|import\s*['"]([^'"]+)['"]|require\(\s*['"]([^'"]+)['"]\s*\)/g
+          
           const rawImports = [...code.matchAll(IMPORT_ANY_RE)]
             .map(m => (m[1] || m[2] || m[3] || '').trim())
-            .filter(Boolean)
-          const uniquePackages = [...new Set(rawImports.map(extractPackageName))]
-          
-          const newPackages = uniquePackages.filter(p => !this.processedPackages.has(p))
-          if (newPackages.length === 0) {
-            console.log('[DIAGNOSE-ONCHANGE] No new packages to process.')
-            return
-          }
-          
-          console.log('[DIAGNOSE-ONCHANGE] New packages to process:', newPackages)
+            .filter(p => p && !p.startsWith('.') && !p.startsWith('file://'))
 
-          for (const pkg of newPackages) {
-            this.addShimForPackage(pkg)
-          }
-          this.updateTsCompilerOptions()
+          const uniqueImports = [...new Set(rawImports)]
+          const getBasePackage = (p) => p.startsWith('@') ? p.split('/').slice(0, 2).join('/') : p.split('/')[0]
+          
+          const newBasePackages = [...new Set(uniqueImports.map(getBasePackage))]
+            .filter(p => !this.processedPackages.has(p))
 
+          if (newBasePackages.length === 0) return
+          
+          console.log('[DIAGNOSE] New base packages for analysis:', newBasePackages)
+          
           this.beginTypesBatch()
 
-          let newPathsFound = false
-          await Promise.all(newPackages.map(async (pkg) => {
+          uniqueImports.forEach(pkgImport => {
+            this.addShimForPackage(pkgImport)
+          })
+          
+          this.updateTsCompilerOptions()
+          console.log('[DIAGNOSE] Shims added. Red lines should disappear.')
+
+          await Promise.all(newBasePackages.map(async (basePackage) => {
+            this.processedPackages.add(basePackage)
+            
+            console.log(`[DIAGNOSE-DEEP-PASS] Starting deep pass for "${basePackage}"`)
             try {
-              this.processedPackages.add(pkg)
-
-              const result = await startTypeLoadingProcess(pkg)
-              console.log(`[DIAGNOSE-ONCHANGE] Result received for "${pkg}":`, result ? { mainVirtualPath: result.mainVirtualPath, libsCount: result.libs.length } : 'null')
-
+              const result = await startTypeLoadingProcess(basePackage)
               if (result && result.libs && result.libs.length > 0) {
+                console.log(`[DIAGNOSE-DEEP-PASS] "${basePackage}" deep pass complete. Adding ${result.libs.length} files.`)
                 this.addExtraLibs(result.libs)
-
-                function cleanupBadPathKeys(paths, pkg) {
-                  for (const k of Object.keys(paths)) {
-                    const badDot = k.startsWith(`${pkg}.`)
-                    const noSlash = k.startsWith(pkg) && !k.includes('/') && k !== pkg
-                    if (badDot || noSlash) delete paths[k]
-                  }
-                }
-
-                cleanupBadPathKeys(this.tsModuleMappings, pkg)
-
+                
                 if (result.subpathMap) {
-                  if (result.subpathMap) {
-                    for (const [subpath, virtualPath] of Object.entries(result.subpathMap)) {
-                      this.tsModuleMappings[subpath] = [virtualPath]
-                    }
+                  for (const [subpath, virtualPath] of Object.entries(result.subpathMap)) {
+                    this.tsModuleMappings[subpath] = [virtualPath]
                   }
                 }
-
                 if (result.mainVirtualPath) {
-                  this.tsModuleMappings[pkg] = [result.mainVirtualPath.replace('file:///node_modules/', '')]
-                } else {
-                  console.warn(`[DIAGNOSE-ONCHANGE] No mainVirtualPath found for "${pkg}", path mapping may be incomplete`)
+                  this.tsModuleMappings[basePackage] = [result.mainVirtualPath.replace('file:///node_modules/', '')]
                 }
+                this.tsModuleMappings[`${basePackage}/*`] = [`${basePackage}/*`]
+                
+                uniqueImports
+                  .filter(p => getBasePackage(p) === basePackage)
+                  .forEach(p => this.removeShimsForPackage(p))
 
-                this.tsModuleMappings[`${pkg}/*`] = [`${pkg}/*`]
-
-                const libsForPkg = result.libs.filter(l => l.filePath.includes(`/node_modules/${pkg}/`))
-                for (const lib of libsForPkg) {
-                  const asPath = lib.filePath.replace('file:///node_modules/', '')
-                  if (asPath.endsWith('/index.d.ts')) {
-                    const dirSpec = asPath.replace('/index.d.ts', '')
-                    if (dirSpec.startsWith(`${pkg}/`)) {
-                      this.tsModuleMappings[dirSpec] = [asPath]
-                    }
-                  }
-                  if (asPath.endsWith('.d.ts')) {
-                    const fileSpec = asPath.replace(/\.d\.ts$/, '')
-                    if (fileSpec.startsWith(`${pkg}/`)) {
-                      this.tsModuleMappings[fileSpec] = [asPath]
-                    }
-                  }
-                }
-
-                this.removeShimsForPackage(pkg)
-                newPathsFound = true
               } else {
-                console.warn(`[DIAGNOSE-ONCHANGE] No types found for "${pkg}", keeping shim`)
+                console.warn(`[DIAGNOSE-DEEP-PASS] No types found for "${basePackage}". Shim will remain.`)
               }
             } catch (e) {
-              console.error('[DIAGNOSE-ONCHANGE] Type load failed for', pkg, e)
+              console.error(`[DIAGNOSE-DEEP-PASS] Crawler failed for "${basePackage}":`, e)
             }
           }))
+          
+          console.log('[DIAGNOSE] All processes finished.')
+          this.endTypesBatch()
 
-        if (newPathsFound) {
-          this.updateTsCompilerOptions()
-        } else {
-          console.log('[DIAGNOSE-ONCHANGE] No new paths were mapped.')
-        }
-
-        this.endTypesBatch()
         } catch (error) {
-          console.error('[DIAGNOSE-ONCHANGE] Error during type loading process:', error)
+          console.error('[DIAGNOSE-ONCHANGE] Critical error during type loading process:', error)
+          this.endTypesBatch()
         }
       }, 1500)
     }
+
     const currentFile = await this.call('fileManager', 'file')
-    if (!currentFile) {
-      return
-    }
-    if (currentFile !== file) {
-      return
-    }
+    if (!currentFile || currentFile !== file) return
+    
     const input = this.get(currentFile)
-    if (!input) {
-      return
-    }
-    // if there's no change, don't do anything
-    if (input === this.previousInput) {
-      return
-    }
+    if (!input || input === this.previousInput) return
+    
     this.previousInput = input
 
-    // fire storage update
-    // NOTE: save at most once per 5 seconds
     if (this.saveTimeout) {
       window.clearTimeout(this.saveTimeout)
     }
