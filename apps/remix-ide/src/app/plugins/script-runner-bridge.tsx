@@ -28,22 +28,28 @@ const configFileName = 'remix.config.json'
 let baseUrl = 'https://remix-project-org.github.io/script-runner-generator'
 const customBuildUrl = 'http://localhost:4000/build' // this will be used when the server is ready
 
+// A helper function that transforms ESM 'import' syntax into a format executable in the browser when 'Run Script' is triggered.
 function transformScriptForRuntime(scriptContent: string): string {
+  // Injects a helper function for dynamic imports at the top of the script.
   const dynamicImportHelper = `const dynamicImport = (p) => new Function(\`return import('https://cdn.jsdelivr.net/npm/\${p}/+esm')\`)();\n`
 
+  // Transforms 'import { member } from "pkg"' into 'const { member } = await dynamicImport("pkg")'.
   let transformed = scriptContent.replace(
     /import\s+({[\s\S]*?})\s+from\s+['"]([^'"]+)['"]/g,
     'const $1 = await dynamicImport("$2");'
   )
+  // Transforms 'import Default from "pkg"'.
   transformed = transformed.replace(
     /import\s+([\w\d_$]+)\s+from\s+['"]([^'"]+)['"]/g,
     'const $1 = (await dynamicImport("$2")).default;'
   )
+  // Transforms 'import * as name from "pkg"'.
   transformed = transformed.replace(
     /import\s+\*\s+as\s+([\w\d_$]+)\s+from\s+['"]([^'"]+)['"]/g,
     'const $1 = await dynamicImport("$2");'
   )
   
+  // Wraps the entire script in an async IIFE (Immediately Invoked Function Expression) to support top-level await.
   return `${dynamicImportHelper}\n(async () => {\n  try {\n${transformed}\n  } catch (e) { console.error('Error executing script:', e); }\n})();`
 }
 
@@ -216,6 +222,8 @@ export class ScriptRunnerBridgePlugin extends Plugin {
     }
     try {
       this.setIsLoading(this.activeConfig.name, true)
+      
+      // Transforms the script into an executable format using the function defined above.
       const transformedScript = transformScriptForRuntime(script)
 
       console.log('--- [ScriptRunner] Original Script ---')

@@ -7,6 +7,7 @@ interface TsCompletionInfo {
   }[]
 }
 
+// [1/4] This class provides TypeScript/JavaScript autocompletion features to the Monaco editor.
 export class RemixTSCompletionProvider implements monacoTypes.languages.CompletionItemProvider {
   monaco: any
 
@@ -14,8 +15,10 @@ export class RemixTSCompletionProvider implements monacoTypes.languages.Completi
     this.monaco = monaco
   }
 
+  // Defines trigger characters for autocompletion (e.g., suggesting object members after typing '.').
   triggerCharacters = ['.', '"', "'", '/', '@']
 
+  // The main function called by the Monaco editor as the user types.
   async provideCompletionItems(model: monacoTypes.editor.ITextModel, position: monacoTypes.Position, context: monacoTypes.languages.CompletionContext): Promise<monacoTypes.languages.CompletionList | undefined> {
     const word = model.getWordUntilPosition(position)
     const range = {
@@ -26,6 +29,8 @@ export class RemixTSCompletionProvider implements monacoTypes.languages.Completi
     }
 
     try {
+      // [4/4] It fetches type information loaded by the editor plugin ('editor.ts') via 'type-fetcher.ts',
+      // using Monaco's built-in TypeScript Worker to generate an autocompletion list.
       const worker = await this.monaco.languages.typescript.getTypeScriptWorker()
       const client = await worker(model.uri)
       const completions: TsCompletionInfo = await client.getCompletionsAtPosition(
@@ -37,6 +42,7 @@ export class RemixTSCompletionProvider implements monacoTypes.languages.Completi
         return { suggestions: []}
       }
 
+      // Converts the suggestion list from the TypeScript Worker into a format that the Monaco editor can understand.
       const suggestions = completions.entries.map(entry => {
         return {
           label: entry.name,
@@ -53,6 +59,7 @@ export class RemixTSCompletionProvider implements monacoTypes.languages.Completi
     }
   }
 
+  // Maps TypeScript's 'CompletionItemKind' string to Monaco's numeric Enum value.
   private mapTsCompletionKindToMonaco(kind: string): monacoTypes.languages.CompletionItemKind {
     const { CompletionItemKind } = this.monaco.languages
     switch (kind) {

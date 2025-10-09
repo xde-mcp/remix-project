@@ -283,7 +283,7 @@ export default class Editor extends Plugin {
     console.log(`[DIAGNOSE-LIBS] Files added. Total extra libs now: ${Object.keys(tsDefaults.getExtraLibs()).length}.`)
   }
 
-  // Called on every editor content change to parse import statements and trigger type loading.
+  // [2/4] The conductor, called on every editor content change to parse 'import' statements and trigger the type loading process.
   async _onChange (file) {
     this.triggerEvent('didChangeFile', [file])
     
