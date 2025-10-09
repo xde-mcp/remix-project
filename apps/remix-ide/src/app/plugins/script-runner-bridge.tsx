@@ -28,34 +28,23 @@ const configFileName = 'remix.config.json'
 let baseUrl = 'https://remix-project-org.github.io/script-runner-generator'
 const customBuildUrl = 'http://localhost:4000/build' // this will be used when the server is ready
 
-/**
- * Transforms standard import statements into dynamic import statements for runtime execution.
- * @param {string} scriptContent The original script content.
- * @returns {string} The transformed script content.
- */
 function transformScriptForRuntime(scriptContent: string): string {
-  // 1. dynamicImport 헬퍼 함수를 스크립트 맨 위에 주입
-  const dynamicImportHelper = `const dynamicImport = (p) => new Function(\`return import('https://cdn.jsdelivr.net/npm/\${p}/+esm')\`)();\n`;
+  const dynamicImportHelper = `const dynamicImport = (p) => new Function(\`return import('https://cdn.jsdelivr.net/npm/\${p}/+esm')\`)();\n`
 
-  // 2. 다양한 import 구문을 변환
-  // 'import { ... } from "package"' 구문
   let transformed = scriptContent.replace(
     /import\s+({[\s\S]*?})\s+from\s+['"]([^'"]+)['"]/g,
     'const $1 = await dynamicImport("$2");'
-  );
-  // 'import Default from "package"' 구문
+  )
   transformed = transformed.replace(
     /import\s+([\w\d_$]+)\s+from\s+['"]([^'"]+)['"]/g,
     'const $1 = (await dynamicImport("$2")).default;'
-  );
-  // 'import * as name from "package"' 구문
+  )
   transformed = transformed.replace(
     /import\s+\*\s+as\s+([\w\d_$]+)\s+from\s+['"]([^'"]+)['"]/g,
     'const $1 = await dynamicImport("$2");'
-  );
+  )
   
-  // 3. 모든 코드를 async IIFE로 감싸서 top-level await 문제 해결
-  return `${dynamicImportHelper}\n(async () => {\n  try {\n${transformed}\n  } catch (e) { console.error('Error executing script:', e); }\n})();`;
+  return `${dynamicImportHelper}\n(async () => {\n  try {\n${transformed}\n  } catch (e) { console.error('Error executing script:', e); }\n})();`
 }
 
 export class ScriptRunnerBridgePlugin extends Plugin {
@@ -227,12 +216,12 @@ export class ScriptRunnerBridgePlugin extends Plugin {
     }
     try {
       this.setIsLoading(this.activeConfig.name, true)
-      const transformedScript = transformScriptForRuntime(script);
+      const transformedScript = transformScriptForRuntime(script)
 
-      console.log('--- [ScriptRunner] Original Script ---');
-      console.log(script);
-      console.log('--- [ScriptRunner] Transformed Script for Runtime ---');
-      console.log(transformedScript);
+      console.log('--- [ScriptRunner] Original Script ---')
+      console.log(script)
+      console.log('--- [ScriptRunner] Transformed Script for Runtime ---')
+      console.log(transformedScript)
 
       await this.call(`${this.scriptRunnerProfileName}${this.activeConfig.name}`, 'execute',transformedScript, filePath)
 

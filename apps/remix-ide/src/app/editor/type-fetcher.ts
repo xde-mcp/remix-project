@@ -25,6 +25,7 @@ function normalizeBareSpecifier(p: string): string {
   return p.split('/')[0]
 }
 
+// Function to generate @types package names, includes logic to prevent infinite recursion.
 function toTypesScopedName(pkg: string): string {
   if (pkg.startsWith('@types/')) return pkg
   if (pkg.startsWith('@')) return '@types/' + pkg.slice(1).replace('/', '__')
@@ -45,11 +46,13 @@ async function fetchJson<T = any>(url: string): Promise<T> {
   return res.json()
 }
 
+// Guesses potential type definition file (.d.ts) paths from a JS file path.
 function guessDtsFromJs(jsPath: string): string[] {
   const base = stripJsLike(jsPath)
   return [`${base}.d.ts`, `${base}.ts`, `${base}/index.d.ts`, `${base}/index.ts`]
 }
 
+// Analyzes the 'exports' field of package.json to create a map of subpaths to their type file URLs.
 function buildExportTypeMap(pkgName: string, pkgJson: PackageJson): Record<string, string[]> {
   const map: Record<string, string[]> = {}
   const base = `${CDN_BASE}${pkgName}/`
@@ -68,6 +71,7 @@ function buildExportTypeMap(pkgName: string, pkgJson: PackageJson): Record<strin
       }
     }
   }
+  // Fallback to 'types'/'typings' field if 'exports' is missing or has no main '.' path defined.
   if (!map['.'] && (pkgJson.types || pkgJson.typings)) {
     push('.', pkgJson.types || pkgJson.typings)
   }
@@ -83,6 +87,7 @@ async function tryFetchOne(urls: string[]): Promise<ResolveResult | null> {
   return null
 }
 
+// A crawler that recursively follows imports/exports within a type definition file (.d.ts).
 async function crawl(entryUrl: string, pkgName: string, visited: Set<string>, enqueuePackage: (name: string) => void): Promise<Library[]> {
   if (visited.has(entryUrl)) return []
   visited.add(entryUrl)
@@ -97,13 +102,16 @@ async function crawl(entryUrl: string, pkgName: string, visited: Set<string>, en
     const crawlNext = (nextUrl: string) => {
       if (!visited.has(nextUrl)) subPromises.push(crawl(nextUrl, pkgName, visited, enqueuePackage))
     }
+    // Handles triple-slash directives like '/// <reference ... />'.
     for (const m of content.matchAll(TRIPLE_SLASH_REF_RE)) crawlNext(new URL(m[1], finalUrl).href)
     for (const m of content.matchAll(IMPORT_ANY_RE)) {
       const spec = (m[1] || m[2] || m[3] || '').trim()
       if (!spec) continue
+      // Continues crawling for relative path imports, and queues up external package imports.
       if (isRelative(spec)) crawlNext(new URL(spec, finalUrl).href)
       else {
         const bare = normalizeBareSpecifier(spec)
+        // Ignores Node.js built-in modules that use the 'node:' protocol.
         if (bare && !bare.startsWith('node:')) enqueuePackage(bare)
       }
     }
@@ -113,11 +121,13 @@ async function crawl(entryUrl: string, pkgName: string, visited: Set<string>, en
   return out
 }
 
+// Main function for the type loading process. Fetches type files for a package and all its dependencies.
 export async function startTypeLoadingProcess(packageName: string): Promise<{ mainVirtualPath: string; libs: Library[]; subpathMap: Record<string, string> } | void> {
   const visitedPackages = new Set<string>()
   const collected: Library[] = []
   const subpathMap: Record<string, string> = {}
 
+  // An inner function that recursively loads packages.
   async function loadPackage(pkgNameToLoad: string) {
     if (visitedPackages.has(pkgNameToLoad)) return
     visitedPackages.add(pkgNameToLoad)
@@ -128,12 +138,14 @@ export async function startTypeLoadingProcess(packageName: string): Promise<{ ma
       pkgJson = await fetchJson<PackageJson>(pkgJsonUrl)
     } catch (e) {
       console.log(`- Package '${pkgNameToLoad}' not found. Attempting @types fallback.`)
+      // If the package is not found, attempt to find its @types equivalent.
       try { await loadPackage(toTypesScopedName(pkgNameToLoad)) } catch (ee) {}
       return
     }
 
     const exportMap = buildExportTypeMap(pkgNameToLoad, pkgJson)
 
+    // If the package is found but contains no type information, attempt the @types fallback.
     if (Object.keys(exportMap).length === 0) {
       console.log(`- No type declarations in '${pkgNameToLoad}'. Attempting @types fallback.`)
       try { await loadPackage(toTypesScopedName(pkgNameToLoad)) } catch (ee) {}
@@ -145,6 +157,7 @@ export async function startTypeLoadingProcess(packageName: string): Promise<{ ma
     const enqueuePackage = (p: string) => { if (!visitedPackages.has(p)) pendingDependencies.add(p) }
     
     const crawlPromises: Promise<Library[]>[] = []
+    // Crawl all entry points of the package to gather complete type information.
     for (const [subpath, urls] of Object.entries(exportMap)) {
       const entryPointUrl = urls[0]
       if (entryPointUrl) {
@@ -157,6 +170,7 @@ export async function startTypeLoadingProcess(packageName: string): Promise<{ ma
     const libsArrays = await Promise.all(crawlPromises)
     libsArrays.forEach(libs => collected.push(...libs))
     
+    // Recursively load any discovered dependency packages.
     if (pendingDependencies.size > 0) {
       console.log(`- Found dependencies for '${pkgNameToLoad}': ${Array.from(pendingDependencies).join(', ')}`)
       await Promise.all(Array.from(pendingDependencies).map(loadPackage))

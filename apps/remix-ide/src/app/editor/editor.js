@@ -283,6 +283,7 @@ export default class Editor extends Plugin {
     console.log(`[DIAGNOSE-LIBS] Files added. Total extra libs now: ${Object.keys(tsDefaults.getExtraLibs()).length}.`)
   }
 
+  // Called on every editor content change to parse import statements and trigger type loading.
   async _onChange (file) {
     this.triggerEvent('didChangeFile', [file])
     
@@ -312,8 +313,11 @@ export default class Editor extends Plugin {
           
           console.log('[DIAGNOSE] New base packages for analysis:', newBasePackages)
           
+          // Temporarily disable type checking during type loading to prevent error flickering.
           this.beginTypesBatch()
 
+          // [Phase 1: Fast Feedback]
+          // Add temporary type definitions (shims) first to immediately remove red underlines on import statements.
           uniqueImports.forEach(pkgImport => {
             this.addShimForPackage(pkgImport)
           })
@@ -321,6 +325,8 @@ export default class Editor extends Plugin {
           this.updateTsCompilerOptions()
           console.log('[DIAGNOSE] Shims added. Red lines should disappear.')
 
+          // [Phase 2: Deep Analysis]
+          // In the background, fetch the actual type files to enable autocompletion.
           await Promise.all(newBasePackages.map(async (basePackage) => {
             this.processedPackages.add(basePackage)
             
@@ -329,8 +335,10 @@ export default class Editor extends Plugin {
               const result = await startTypeLoadingProcess(basePackage)
               if (result && result.libs && result.libs.length > 0) {
                 console.log(`[DIAGNOSE-DEEP-PASS] "${basePackage}" deep pass complete. Adding ${result.libs.length} files.`)
+                 // Add all fetched type files to Monaco.
                 this.addExtraLibs(result.libs)
                 
+                // Update path mappings so TypeScript can find the types.
                 if (result.subpathMap) {
                   for (const [subpath, virtualPath] of Object.entries(result.subpathMap)) {
                     this.tsModuleMappings[subpath] = [virtualPath]
@@ -341,19 +349,23 @@ export default class Editor extends Plugin {
                 }
                 this.tsModuleMappings[`${basePackage}/*`] = [`${basePackage}/*`]
                 
+                // Remove the temporary shims now that the real types are loaded.
                 uniqueImports
                   .filter(p => getBasePackage(p) === basePackage)
                   .forEach(p => this.removeShimsForPackage(p))
 
               } else {
+                // Shim will remain if no types are found.
                 console.warn(`[DIAGNOSE-DEEP-PASS] No types found for "${basePackage}". Shim will remain.`)
               }
             } catch (e) {
+              // Crawler can fail, but we don't want to crash the whole process.
               console.error(`[DIAGNOSE-DEEP-PASS] Crawler failed for "${basePackage}":`, e)
             }
           }))
           
           console.log('[DIAGNOSE] All processes finished.')
+           // After all type loading is complete, re-enable type checking and apply the final state.
           this.endTypesBatch()
 
         } catch (error) {
