@@ -13,7 +13,7 @@ import { ScriptRunnerUIPlugin } from '../tabs/script-runner-ui'
 const profile = {
   name: 'scriptRunnerBridge',
   displayName: 'Script configuration',
-  methods: ['execute', 'getConfigurations', 'selectScriptRunner'],
+  methods: ['execute', 'getConfigurations', 'selectScriptRunner', 'getActiveRunnerLibs'],
   events: ['log', 'info', 'warn', 'error'],
   icon: 'assets/img/solid-gear-circle-play.svg',
   description: 'Configure the dependencies for running scripts.',
@@ -28,28 +28,69 @@ const configFileName = 'remix.config.json'
 let baseUrl = 'https://remix-project-org.github.io/script-runner-generator'
 const customBuildUrl = 'http://localhost:4000/build' // this will be used when the server is ready
 
-// A helper function that transforms ESM 'import' syntax into a format executable in the browser when 'Run Script' is triggered.
-function transformScriptForRuntime(scriptContent: string): string {
-  // Injects a helper function for dynamic imports at the top of the script.
+/**
+ * @description A helper function that transforms script content for runtime execution.
+ * It handles three types of ES module 'import' statements based on code review feedback:
+ * 1. Relative path imports (e.g., './utils'): Converts to `require()` to use Remix's original module system.
+ * 2. Pre-bundled library imports (e.g., 'ethers'): Converts to use global `window` objects to prevent version conflicts.
+ * 3. External/NPM package imports (e.g., 'axios'): Converts to a dynamic `import()` from a CDN.
+ * * @param {string} scriptContent - The original TypeScript/JavaScript content.
+ * @param {string[]} preBundledDeps - A list of pre-bundled dependency names.
+ * @returns {string} The transformed script content ready for execution.
+ */
+function transformScriptForRuntime(scriptContent: string, preBundledDeps: string[] = []): string {
+  // Helper for dynamically importing external packages from a CDN.
   const dynamicImportHelper = `const dynamicImport = (p) => new Function(\`return import('https://cdn.jsdelivr.net/npm/\${p}/+esm')\`)();\n`
 
-  // Transforms 'import { member } from "pkg"' into 'const { member } = await dynamicImport("pkg")'.
+  // Step 1: Transform 'import' statements
   let transformed = scriptContent.replace(
-    /import\s+({[\s\S]*?})\s+from\s+['"]([^'"]+)['"]/g,
-    'const $1 = await dynamicImport("$2");'
-  )
-  // Transforms 'import Default from "pkg"'.
-  transformed = transformed.replace(
-    /import\s+([\w\d_$]+)\s+from\s+['"]([^'"]+)['"]/g,
-    'const $1 = (await dynamicImport("$2")).default;'
-  )
-  // Transforms 'import * as name from "pkg"'.
-  transformed = transformed.replace(
-    /import\s+\*\s+as\s+([\w\d_$]+)\s+from\s+['"]([^'"]+)['"]/g,
-    'const $1 = await dynamicImport("$2");'
-  )
-  
-  // Wraps the entire script in an async IIFE (Immediately Invoked Function Expression) to support top-level await.
+    /import\s+(?:({[\s\S]*?})|([\w\d_$]+)|(\*\s+as\s+[\w\d_$]+))\s+from\s+['"]([^'"]+)['"]/g,
+    (match, namedMembers, defaultMember, namespaceMember, pkg) => {
+      
+      // Case 1: Relative path import. This was a previously working feature.
+      // By converting to `require()`, we let Remix's original script runner handle it.
+      if (pkg.startsWith('./') || pkg.startsWith('../')) {
+        if (namedMembers) return `const ${namedMembers} = require("${pkg}");`
+        if (defaultMember) return `const ${defaultMember} = require("${pkg}");`
+        if (namespaceMember) {
+          const alias = namespaceMember.split(' as ')[1]
+          return `const ${alias} = require("${pkg}");`
+        }
+      }
+      
+      // Case 2: Pre-bundled library import (e.g., 'ethers').
+      // Uses the global `window` object to avoid version conflicts and TDZ ReferenceErrors.
+      if (preBundledDeps.includes(pkg)) {
+        const libName = pkg.split('/').pop()
+        const sourceObject = `window.${libName}`
+        if (namedMembers) return `const ${namedMembers} = ${sourceObject};`
+        if (defaultMember) return `const ${defaultMember} = ${sourceObject};`
+        if (namespaceMember) {
+          const alias = namespaceMember.split(' as ')[1]
+          return `const ${alias} = ${sourceObject};`
+        }
+      }
+
+      // Case 3: External/NPM package import.
+      // This is the new dynamic import feature for user-added packages.
+      if (namedMembers) return `const ${namedMembers} = await dynamicImport("${pkg}");`
+      if (defaultMember) return `const ${defaultMember} = (await dynamicImport("${pkg}")).default;`
+      if (namespaceMember) {
+        const alias = namespaceMember.split(' as ')[1]
+        return `const ${alias} = await dynamicImport("${pkg}");`
+      }
+      
+      // Fallback for any unsupported import syntax.
+      return `// Unsupported import for: ${pkg}`
+    }
+  );
+
+  // Step 2: Remove 'export' keyword
+  // The script runner's execution context is not a module, so 'export' is a SyntaxError.
+  transformed = transformed.replace(/^export\s+/gm, '')
+
+  // Step 3: Wrap in an async IIFE
+  // This enables the use of top-level 'await' for dynamic imports.
   return `${dynamicImportHelper}\n(async () => {\n  try {\n${transformed}\n  } catch (e) { console.error('Error executing script:', e); }\n})();`
 }
 
@@ -86,7 +127,6 @@ export class ScriptRunnerBridgePlugin extends Plugin {
     await this.loadConfigurations()
     const ui: ScriptRunnerUIPlugin = new ScriptRunnerUIPlugin(this)
     this.engine.register(ui)
-
   }
 
   setListeners() {
@@ -136,6 +176,13 @@ export class ScriptRunnerBridgePlugin extends Plugin {
         this.renderComponent()
       }
     })
+  }
+
+  public getActiveRunnerLibs() {
+    if (this.activeConfig && this.activeConfig.dependencies) {
+      return this.activeConfig.dependencies
+    }
+    return []
   }
 
   public getConfigurations() {
@@ -224,7 +271,8 @@ export class ScriptRunnerBridgePlugin extends Plugin {
       this.setIsLoading(this.activeConfig.name, true)
       
       // Transforms the script into an executable format using the function defined above.
-      const transformedScript = transformScriptForRuntime(script)
+      const preBundledDeps = this.activeConfig.dependencies.map(dep => dep.name)
+      const transformedScript = transformScriptForRuntime(script, preBundledDeps)
 
       console.log('--- [ScriptRunner] Original Script ---')
       console.log(script)

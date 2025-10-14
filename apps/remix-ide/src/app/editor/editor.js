@@ -82,8 +82,8 @@ export default class Editor extends Plugin {
 
     this.typesLoadingCount = 0
     this.shimDisposers = new Map()
-    this.pendingPackagesBatch = new Set()
   }
+
 
   setDispatch (dispatch) {
     this.dispatch = dispatch
@@ -330,9 +330,15 @@ export default class Editor extends Plugin {
           await Promise.all(newBasePackages.map(async (basePackage) => {
             this.processedPackages.add(basePackage)
             
-            console.log(`[DIAGNOSE-DEEP-PASS] Starting deep pass for "${basePackage}"`)
+            const activeRunnerLibs = await this.call('scriptRunnerBridge', 'getActiveRunnerLibs')
+      
+            const libInfo = activeRunnerLibs.find(lib => lib.name === basePackage)
+            const packageToLoad = libInfo ? `${libInfo.name}@${libInfo.version}` : basePackage
+            
+            console.log(`[DIAGNOSE] Preparing to load types for: "${packageToLoad}"`)
+
             try {
-              const result = await startTypeLoadingProcess(basePackage)
+              const result = await startTypeLoadingProcess(packageToLoad)
               if (result && result.libs && result.libs.length > 0) {
                 console.log(`[DIAGNOSE-DEEP-PASS] "${basePackage}" deep pass complete. Adding ${result.libs.length} files.`)
                  // Add all fetched type files to Monaco.

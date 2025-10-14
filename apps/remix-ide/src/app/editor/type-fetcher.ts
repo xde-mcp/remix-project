@@ -136,55 +136,55 @@ export async function startTypeLoadingProcess(packageName: string): Promise<{ ma
   const collected: Library[] = []
   const subpathMap: Record<string, string> = {}
 
-  // The core inner function that recursively loads a package and its dependencies.
+  // The core inner function that recursively loads a package and its dependencies. 
   async function loadPackage(pkgNameToLoad: string) {
-    if (visitedPackages.has(pkgNameToLoad)) return
-    visitedPackages.add(pkgNameToLoad)
-    
-    let pkgJson: PackageJson
-    try {
-      const pkgJsonUrl = new URL('package.json', `${CDN_BASE}${pkgNameToLoad}/`).href
-      pkgJson = await fetchJson<PackageJson>(pkgJsonUrl)
-    } catch (e) {
-      console.log(`- Package '${pkgNameToLoad}' not found. Attempting @types fallback.`)
-      // If the package is not found, attempt to find its @types equivalent.
-      try { await loadPackage(toTypesScopedName(pkgNameToLoad)) } catch (ee) {}
-      return
-    }
+  if (visitedPackages.has(pkgNameToLoad)) return
+  visitedPackages.add(pkgNameToLoad)
+  
+  let pkgJson: PackageJson
+  try {
+    const pkgJsonUrl = new URL('package.json', `${CDN_BASE}${pkgNameToLoad}/`).href
+    pkgJson = await fetchJson<PackageJson>(pkgJsonUrl)
+  } catch (e) {
+    console.log(`- Package '${pkgNameToLoad}' not found. Attempting @types fallback.`)
+    // If the package is not found, attempt to find its @types equivalent.
+    try { await loadPackage(toTypesScopedName(pkgNameToLoad)) } catch (ee) {}
+    return
+  }
 
-    const exportMap = buildExportTypeMap(pkgNameToLoad, pkgJson)
+  const exportMap = buildExportTypeMap(pkgNameToLoad, pkgJson)
 
-    // If the package is found but contains no type information, attempt the @types fallback.
-    if (Object.keys(exportMap).length === 0) {
-      console.log(`- No type declarations in '${pkgNameToLoad}'. Attempting @types fallback.`)
-      try { await loadPackage(toTypesScopedName(pkgNameToLoad)) } catch (ee) {}
-      return
-    }
-    
-    console.log(`[LOG 1] Starting full analysis for package: '${pkgNameToLoad}'`)
-    const pendingDependencies = new Set<string>()
-    const enqueuePackage = (p: string) => { if (!visitedPackages.has(p)) pendingDependencies.add(p) }
-    
-    const crawlPromises: Promise<Library[]>[] = []
-    // Crawl all entry points of the package to gather complete type information.
-    for (const [subpath, urls] of Object.entries(exportMap)) {
-      const entryPointUrl = urls[0]
-      if (entryPointUrl) {
-        const virtualPathKey = subpath === '.' ? pkgNameToLoad : `${pkgNameToLoad}/${subpath.replace('./', '')}`
-        subpathMap[virtualPathKey] = entryPointUrl.replace(CDN_BASE, '')
-        crawlPromises.push(crawl(entryPointUrl, pkgNameToLoad, new Set<string>(), enqueuePackage))
-      }
-    }
-
-    const libsArrays = await Promise.all(crawlPromises)
-    libsArrays.forEach(libs => collected.push(...libs))
-    
-    // Recursively load any discovered dependency packages.
-    if (pendingDependencies.size > 0) {
-      console.log(`- Found dependencies for '${pkgNameToLoad}': ${Array.from(pendingDependencies).join(', ')}`)
-      await Promise.all(Array.from(pendingDependencies).map(loadPackage))
+  // If the package is found but contains no type information, attempt the @types fallback.
+  if (Object.keys(exportMap).length === 0) {
+    console.log(`- No type declarations in '${pkgNameToLoad}'. Attempting @types fallback.`)
+    try { await loadPackage(toTypesScopedName(pkgNameToLoad)) } catch (ee) {}
+    return
+  }
+  
+  console.log(`[LOG 1] Starting full analysis for package: '${pkgNameToLoad}'`)
+  const pendingDependencies = new Set<string>()
+  const enqueuePackage = (p: string) => { if (!visitedPackages.has(p)) pendingDependencies.add(p) }
+  
+  const crawlPromises: Promise<Library[]>[] = []
+  // Crawl all entry points of the package to gather complete type information.
+  for (const [subpath, urls] of Object.entries(exportMap)) {
+    const entryPointUrl = urls[0]
+    if (entryPointUrl) {
+      const virtualPathKey = subpath === '.' ? pkgNameToLoad.split('@')[0] : `${pkgNameToLoad.split('@')[0]}/${subpath.replace('./', '')}`
+      subpathMap[virtualPathKey] = entryPointUrl.replace(CDN_BASE, '')
+      crawlPromises.push(crawl(entryPointUrl, pkgNameToLoad, new Set<string>(), enqueuePackage))
     }
   }
+
+  const libsArrays = await Promise.all(crawlPromises)
+  libsArrays.forEach(libs => collected.push(...libs))
+  
+  // Recursively load any discovered dependency packages.
+  if (pendingDependencies.size > 0) {
+    console.log(`- Found dependencies for '${pkgNameToLoad}': ${Array.from(pendingDependencies).join(', ')}`)
+    await Promise.all(Array.from(pendingDependencies).map(loadPackage))
+  }
+}
 
   await loadPackage(packageName)
 
