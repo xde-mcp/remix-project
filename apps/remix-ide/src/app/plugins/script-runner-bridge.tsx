@@ -30,69 +30,85 @@ const customBuildUrl = 'http://localhost:4000/build' // this will be used when t
 
 /**
  * @description A helper function that transforms script content for runtime execution.
- * It handles three types of ES module 'import' statements based on code review feedback:
- * 1. Relative path imports (e.g., './utils'): Converts to `require()` to use Remix's original module system.
- * 2. Pre-bundled library imports (e.g., 'ethers'): Converts to use global `window` objects to prevent version conflicts.
- * 3. External/NPM package imports (e.g., 'axios'): Converts to a dynamic `import()` from a CDN.
- * * @param {string} scriptContent - The original TypeScript/JavaScript content.
- * @param {string[]} preBundledDeps - A list of pre-bundled dependency names.
- * @returns {string} The transformed script content ready for execution.
+ * It dynamically determines the transformation strategy based on whether external libraries are used.
+ * @param scriptContent The original script content.
+ * @param preBundledDeps An array of dependency objects for the active runner.
+ * @returns The transformed script content.
  */
-function transformScriptForRuntime(scriptContent: string, preBundledDeps: string[] = []): string {
-  // Helper for dynamically importing external packages from a CDN.
-  const dynamicImportHelper = `const dynamicImport = (p) => new Function(\`return import('https://cdn.jsdelivr.net/npm/\${p}/+esm')\`)();\n`
+function transformScriptForRuntime(scriptContent: string, preBundledDeps: ProjectConfiguration['dependencies'] = []): string {
+  const depNames = preBundledDeps.map(dep => dep.name)
 
-  // Step 1: Transform 'import' statements
+  // This is an exception list for pre-bundled libraries whose 'import' statements should be left as is.
+  const STATIC_TRANSFORM_EXCEPTIONS = [
+    '@noir-lang/noir_wasm',
+    '@noir-lang/noir_js',
+    '@aztec/bb.js'
+  ]
+
+  // Check for external library imports (not pre-bundled) to determine if an async IIFE wrapper is needed.
+  const externalImportRegex = /import\s+[\s\S]*?\s+from\s+['"]((?!\.\.?\/)[^'"]+)['"]/g
+  let needsAsyncWrapper = false
+  let match
+  while ((match = externalImportRegex.exec(scriptContent)) !== null) {
+    if (!depNames.includes(match[1])) {
+      needsAsyncWrapper = true
+      break
+    }
+  }
+
   let transformed = scriptContent.replace(
     /import\s+(?:({[\s\S]*?})|([\w\d_$]+)|(\*\s+as\s+[\w\d_$]+))\s+from\s+['"]([^'"]+)['"]/g,
-    (match, namedMembers, defaultMember, namespaceMember, pkg) => {
-      
-      // Case 1: Relative path import. This was a previously working feature.
-      // By converting to `require()`, we let Remix's original script runner handle it.
+    (fullMatch, namedMembers, defaultMember, namespaceMember, pkg) => {
+      // Case 1: Transform relative path imports to require().
       if (pkg.startsWith('./') || pkg.startsWith('../')) {
-        if (namedMembers) return `const ${namedMembers} = require("${pkg}");`
-        if (defaultMember) return `const ${defaultMember} = require("${pkg}");`
-        if (namespaceMember) {
-          const alias = namespaceMember.split(' as ')[1]
-          return `const ${alias} = require("${pkg}");`
-        }
-      }
-      
-      // Case 2: Pre-bundled library import (e.g., 'ethers').
-      // Uses the global `window` object to avoid version conflicts and TDZ ReferenceErrors.
-      if (preBundledDeps.includes(pkg)) {
-        const libName = pkg.split('/').pop()
-        const sourceObject = `window.${libName}`
-        if (namedMembers) return `const ${namedMembers} = ${sourceObject};`
-        if (defaultMember) return `const ${defaultMember} = ${sourceObject};`
-        if (namespaceMember) {
-          const alias = namespaceMember.split(' as ')[1]
-          return `const ${alias} = ${sourceObject};`
-        }
+        const members = namedMembers || defaultMember || (namespaceMember ? namespaceMember.replace('* as', '').trim() : '')
+        return members ? `const ${members} = require("${pkg}");` : `require("${pkg}");`
       }
 
-      // Case 3: External/NPM package import.
-      // This is the new dynamic import feature for user-added packages.
-      if (namedMembers) return `const ${namedMembers} = await dynamicImport("${pkg}");`
-      if (defaultMember) return `const ${defaultMember} = (await dynamicImport("${pkg}")).default;`
-      if (namespaceMember) {
-        const alias = namespaceMember.split(' as ')[1]
-        return `const ${alias} = await dynamicImport("${pkg}");`
+      const depInfo = preBundledDeps.find(dep => dep.name === pkg)
+
+      if (depInfo) {
+        // Case 2: Handling pre-bundled libraries.
+        // If the library is in the exception list (e.g., noir), return the original import statement.
+        if (STATIC_TRANSFORM_EXCEPTIONS.includes(pkg)) {
+          return fullMatch
+        }
+
+        // Only when the async wrapper is needed, transform to use the 'window' global object as an emergency measure.
+        if (needsAsyncWrapper) {
+          const members = namedMembers || defaultMember || (namespaceMember ? namespaceMember.replace('* as', '').trim() : '')
+          
+          // Since namedMembers includes braces like '{ ethers }', we can use it directly.
+          return members ? `const ${members} = require("${pkg}");` : `const ${pkg} = require("${pkg}");`
+        }
+        
+        return fullMatch
+      }
+
+      if (defaultMember) {
+        return `const _${defaultMember}_module = await dynamicImport("${pkg}"); const ${defaultMember} = _${defaultMember}_module.default || _${defaultMember}_module;`
       }
       
-      // Fallback for any unsupported import syntax.
-      return `// Unsupported import for: ${pkg}`
+      // Case 3: Transform external libraries using dynamicImport().
+      const members = namedMembers || defaultMember || (namespaceMember ? namespaceMember.replace('* as', '').trim() : null)
+      if (defaultMember) return `const ${defaultMember} = (await dynamicImport("${pkg}")).default`
+      if (members) return `const ${members} = await dynamicImport("${pkg}")`
+      
+      return fullMatch
     }
-  );
+  )
 
-  // Step 2: Remove 'export' keyword
-  // The script runner's execution context is not a module, so 'export' is a SyntaxError.
-  transformed = transformed.replace(/^export\s+/gm, '')
+  // Wrap the entire script in an async IIFE only when external libraries are used.
+  if (needsAsyncWrapper) {
+    const dynamicImportHelper = `const dynamicImport = (p) => new Function(\`return import('https://cdn.jsdelivr.net/npm/\${p}/+esm')\`)();\n`
 
-  // Step 3: Wrap in an async IIFE
-  // This enables the use of top-level 'await' for dynamic imports.
-  return `${dynamicImportHelper}\n(async () => {\n  try {\n${transformed}\n  } catch (e) { console.error('Error executing script:', e); }\n})();`
+    transformed = transformed.replace(/^export\s+/gm, '')
+    return `${dynamicImportHelper}\n(async () => {\n  try {\n${transformed}\n  } catch (e) { console.error('Error executing script:', e) }\n})()`
+  }
+
+  return transformed
 }
+
 
 export class ScriptRunnerBridgePlugin extends Plugin {
   engine: Engine
@@ -269,17 +285,15 @@ export class ScriptRunnerBridgePlugin extends Plugin {
     }
     try {
       this.setIsLoading(this.activeConfig.name, true)
-      
-      // Transforms the script into an executable format using the function defined above.
-      const preBundledDeps = this.activeConfig.dependencies.map(dep => dep.name)
-      const transformedScript = transformScriptForRuntime(script, preBundledDeps)
+       // Transforms the script into an executable format using the function defined above.
+      const transformedScript = transformScriptForRuntime(script, this.activeConfig.dependencies)
 
       console.log('--- [ScriptRunner] Original Script ---')
       console.log(script)
       console.log('--- [ScriptRunner] Transformed Script for Runtime ---')
       console.log(transformedScript)
 
-      await this.call(`${this.scriptRunnerProfileName}${this.activeConfig.name}`, 'execute',transformedScript, filePath)
+      await this.call(`${this.scriptRunnerProfileName}${this.activeConfig.name}`, 'execute', transformedScript, filePath)
 
     } catch (e) {
       console.error('Error executing script', e)

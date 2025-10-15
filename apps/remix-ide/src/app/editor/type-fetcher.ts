@@ -58,30 +58,63 @@ function guessDtsFromJs(jsPath: string): string[] {
   return [`${base}.d.ts`, `${base}.ts`, `${base}/index.d.ts`, `${base}/index.ts`]
 }
 
-// Analyzes the 'exports' field of a package.json to create a map of subpath entry points to their corresponding type definition file URLs.
-// This map is crucial for correctly resolving subpath imports like 'viem' vs. 'viem/chains'.
 function buildExportTypeMap(pkgName: string, pkgJson: PackageJson): Record<string, string[]> {
   const map: Record<string, string[]> = {}
   const base = `${CDN_BASE}${pkgName}/`
   const push = (subpath: string, relPath: string | undefined) => {
     if (!relPath) return
-    map[subpath] = guessDtsFromJs(relPath).map(a => new URL(a, base).href)
+
+    // [DEBUG] Check what values are being passed to the push function.
+    console.log(`[DEBUG] push called with: subpath='${subpath}', relPath='${relPath}'`)
+
+    if (/\.d\.[mc]?ts$/.test(relPath)) {
+      // [DEBUG] Case when using the declaration file path directly.
+      console.log(`[DEBUG] Direct declaration path matched for '${relPath}'. Using it as is.`)
+      map[subpath] = [new URL(relPath, base).href]
+    } else {
+      // [DEBUG] Case when guessing based on a JS file path.
+      console.log(`[DEBUG] Guessing declaration path for '${relPath}'.`)
+      map[subpath] = guessDtsFromJs(relPath).map(a => new URL(a, base).href)
+    }
   }
 
-  if (pkgJson.exports && typeof pkgJson.exports === 'object') {
-    for (const [k, v] of Object.entries(pkgJson.exports)) {
-      if (typeof v === 'string') push(k, v)
-      else if (v && typeof v === 'object') {
-        if (v.types) push(k, v.types)
-        else if (v.import) push(k, v.import)
-        else if (v.default) push(k, v.default)
+  if (pkgJson.exports) {
+    const exports = pkgJson.exports as Record<string, any>
+
+    // [DEBUG] Check the value of exports.types.
+    console.log(`[DEBUG] Checking exports.types:`, exports.types)
+
+    if (exports.types) {
+      push('.', exports.types)
+      
+      // [DEBUG] Check the state of the map object after processing exports.types.
+      console.log(`[DEBUG] Map state after exports.types:`, JSON.stringify(map, null, 2))
+      return map
+    }
+    
+    if (typeof exports === 'object') {
+      for (const [subpath, condition] of Object.entries(exports)) {
+        if (typeof condition === 'object' && condition !== null) {
+          if (condition.types) {
+            push(subpath, condition.types)
+          } else {
+            push(subpath, condition.import || condition.default)
+          }
+        } else if (typeof condition === 'string') {
+          push(subpath, condition)
+        }
       }
     }
   }
-  // Fallback to 'types'/'typings' field if 'exports' is missing or has no main '.' path defined.
-  if (!map['.'] && (pkgJson.types || pkgJson.typings)) {
+
+  if (Object.keys(map).length === 0 && (pkgJson.types || pkgJson.typings)) {
+    // [DEBUG] Case when using the top-level types field.
+    console.log(`[DEBUG] Falling back to top-level types field:`, pkgJson.types || pkgJson.typings)
     push('.', pkgJson.types || pkgJson.typings)
   }
+
+  // [DEBUG] Check the final state of the map object just before returning.
+  console.log(`[DEBUG] Final map state for '${pkgName}':`, JSON.stringify(map, null, 2))
   return map
 }
 
@@ -102,7 +135,12 @@ async function crawl(entryUrl: string, pkgName: string, visited: Set<string>, en
   visited.add(entryUrl)
   const out: Library[] = []
   try {
-    const res = await tryFetchOne(guessDtsFromJs(entryUrl))
+    // Check if the entryUrl is already a type declaration file.
+    const urlsToTry = /\.d\.[mc]?ts$/.test(entryUrl)
+      ? [entryUrl] // If yes, use only that URL without guessing.
+      : guessDtsFromJs(entryUrl) // Otherwise, guess the paths.
+
+    const res = await tryFetchOne(urlsToTry)
     if(!res) return []
     
     const { finalUrl, content } = res
@@ -126,7 +164,9 @@ async function crawl(entryUrl: string, pkgName: string, visited: Set<string>, en
     }
     const results = await Promise.all(subPromises)
     results.forEach(arr => out.push(...arr))
-  } catch (e) {}
+  } catch (e) {
+    // console.error(`Crawl failed for ${entryUrl}:`, e) // Optional: for deeper debugging
+  }
   return out
 }
 
@@ -170,7 +210,9 @@ export async function startTypeLoadingProcess(packageName: string): Promise<{ ma
   for (const [subpath, urls] of Object.entries(exportMap)) {
     const entryPointUrl = urls[0]
     if (entryPointUrl) {
-      const virtualPathKey = subpath === '.' ? pkgNameToLoad.split('@')[0] : `${pkgNameToLoad.split('@')[0]}/${subpath.replace('./', '')}`
+      const pkgNameWithoutVersion = pkgNameToLoad.replace(/@[\^~]?[\d\.\w-]+$/, '')
+      const virtualPathKey = subpath === '.' ? pkgNameWithoutVersion : `${pkgNameWithoutVersion}/${subpath.replace('./', '')}`
+
       subpathMap[virtualPathKey] = entryPointUrl.replace(CDN_BASE, '')
       crawlPromises.push(crawl(entryPointUrl, pkgNameToLoad, new Set<string>(), enqueuePackage))
     }
