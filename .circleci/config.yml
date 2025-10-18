@@ -41,7 +41,7 @@ jobs:
 
   build:
     docker:
-      - image: cimg/node:20.19.0-browsers
+      - image: cimg/node:22.12.0-browsers
     resource_class: << pipeline.parameters.resource_class >>
     working_directory: ~/remix-project
     steps:
@@ -102,14 +102,20 @@ jobs:
       - run:
           name: Inject E2E test configuration
           command: yarn inject-e2e-config
-      - run: yarn run build:e2e
+      - run:
+          name: Ensure remixd built
+          command: |
+            yarn nx build remixd -v
+      - run:
+          name: Build E2E types
+          command: yarn run build:e2e
       - store_artifacts:
           path: logs
           destination: nx-logs
 
   build-plugin:
       docker:
-      - image: cimg/node:20.19.0-browsers
+        - image: cimg/node:22.12.0-browsers
       resource_class: << pipeline.parameters.resource_class >>
       working_directory: ~/remix-project
       parameters:
@@ -129,7 +135,7 @@ jobs:
   
   lint:
     docker:
-      - image: cimg/node:20.19.0-browsers
+      - image: cimg/node:22.12.0-browsers
     resource_class: << pipeline.parameters.resource_class >>
     working_directory: ~/remix-project
     steps:
@@ -144,7 +150,7 @@ jobs:
           command: node ./apps/remix-ide/ci/lint-targets.js
   remix-libs:
     docker:
-      - image: cimg/node:20.19.0-browsers
+      - image: cimg/node:22.12.0-browsers
     resource_class: << pipeline.parameters.resource_class >>
     working_directory: ~/remix-project
     steps:
@@ -168,7 +174,7 @@ jobs:
 
   check-flaky-or-pr-tests:
     docker:
-      - image: cimg/node:24.3.0
+      - image: cimg/node:22.12.0
     working_directory: ~/remix-project
     parameters:
       pattern:
@@ -195,7 +201,7 @@ jobs:
 
   remix-ide-browser:
     docker:
-      - image: cimg/node:20.19.0-browsers
+      - image: cimg/node:22.12.0-browsers
     resource_class: << pipeline.parameters.resource_class >>
     working_directory: ~/remix-project
     parameters:
@@ -241,7 +247,13 @@ jobs:
       - run:
           name: Inject E2E test configuration
           command: yarn inject-e2e-config
-      - run: yarn run build:e2e
+      - run:
+          name: Ensure remixd built
+          command: |
+            yarn nx build remixd -v
+      - run:
+          name: Build E2E types
+          command: yarn run build:e2e
       - run: grep -ir "[0-9]+commit" apps/* libs/* --include \*.ts --include \*.tsx --include \*.json > soljson-versions.txt
       - restore_cache:
           keys:
@@ -313,7 +325,7 @@ jobs:
 
   remix-test-plugins:
     docker:
-      - image: cimg/node:20.17.0-browsers
+      - image: cimg/node:22.12.0-browsers
     resource_class: << pipeline.parameters.resource_class >>
     working_directory: ~/remix-project
     parameters:
@@ -366,7 +378,7 @@ jobs:
 
   predeploy:
     docker:
-      - image: cimg/node:20.19.0-browsers
+      - image: cimg/node:22.12.0-browsers
     resource_class: << pipeline.parameters.resource_class >>
     working_directory: ~/remix-project
     steps:
@@ -383,7 +395,7 @@ jobs:
 
   deploy-build:
     docker:
-      - image: cimg/node:20.19.0-browsers
+      - image: cimg/node:22.12.0-browsers
 
     resource_class:
       xlarge
