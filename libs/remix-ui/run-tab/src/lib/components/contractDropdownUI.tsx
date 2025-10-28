@@ -1,17 +1,19 @@
 // eslint-disable-next-line no-use-before-define
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useContext, useEffect, useRef, useState } from 'react'
 import { FormattedMessage, useIntl } from 'react-intl'
 import { ContractDropdownProps, DeployMode } from '../types'
 import { ContractData, FuncABI, OverSizeLimit } from '@remix-project/core-plugin'
 import * as ethJSUtil from '@ethereumjs/util'
 import { ContractGUI } from './contractGUI'
 import { CustomTooltip, deployWithProxyMsg, upgradeWithProxyMsg } from '@remix-ui/helper'
+import { TrackingContext } from '@remix-ide/tracking'
+import { UdappEvent } from '@remix-api'
 import { VerificationSettingsUI } from './verificationSettingsUI'
-
-const _paq = (window._paq = window._paq || [])
 
 export function ContractDropdownUI(props: ContractDropdownProps) {
   const intl = useIntl()
+  const { trackMatomoEvent: baseTrackEvent } = useContext(TrackingContext)
+  const trackMatomoEvent = <T extends UdappEvent = UdappEvent>(event: T) => baseTrackEvent?.<T>(event)
   const [abiLabel, setAbiLabel] = useState<{
     display: string
     content: string
@@ -413,6 +415,13 @@ export function ContractDropdownUI(props: ContractDropdownProps) {
       evmVersion = JSON.parse(loadedContractData.metadata).settings.evmVersion
     }
   } catch (err) {}
+
+  const deployButtonTitle = isVerifyChecked
+    ? intl.formatMessage({ id: 'udapp.deployAndVerify', defaultMessage: 'Deploy & Verify' })
+    : intl.formatMessage({ id: 'udapp.deploy' })
+
+  const deployButtonWidthClass = isVerifyChecked ? 'w-auto' : 'w-50'
+
   return (
     <div className="udapp_container mb-2" data-id="contractDropdownContainer">
       <div className="d-flex justify-content-between">
@@ -443,7 +452,7 @@ export function ContractDropdownUI(props: ContractDropdownProps) {
             >
               <i style={{ cursor: 'pointer' }} onClick={(_) => {
                 props.syncContracts()
-                _paq.push(['trackEvent', 'udapp', 'syncContracts', compilationSource ? compilationSource : 'compilationSourceNotYetSet'])
+                trackMatomoEvent({ category: 'udapp', action: 'syncContracts', name: compilationSource ? compilationSource : 'compilationSourceNotYetSet', isClick: true })
               }} className="udapp_syncFramework udapp_icon fa fa-refresh" aria-hidden="true"></i>
             </CustomTooltip>
           ) : null}
@@ -490,7 +499,7 @@ export function ContractDropdownUI(props: ContractDropdownProps) {
             </span>
           }
         >
-          <span className="udapp_evmVersion badge alert-warning">
+          <span className="udapp_evmVersion badge alert-warning mb-2">
             <FormattedMessage id="udapp.evmVersion" />: {evmVersion}
           </span>
         </CustomTooltip>
@@ -499,8 +508,14 @@ export function ContractDropdownUI(props: ContractDropdownProps) {
         <div className="udapp_deployDropdown">
           {((contractList[currentFile] && contractList[currentFile].filter((contract) => contract)) || []).length > 0 && loadedContractData && (
             <div>
+              {isNetworkSupported && (
+                <VerificationSettingsUI
+                  isVerifyChecked={isVerifyChecked}
+                  onVerifyCheckedChange={handleVerifyCheckedChange}
+                />
+              )}
               <ContractGUI
-                title={intl.formatMessage({ id: 'udapp.deploy' })}
+                title={deployButtonTitle}
                 getCompilerDetails={props.getCompilerDetails}
                 isDeploy={true}
                 deployOption={deployOptions[currentFile] && deployOptions[currentFile][currentContract] ? deployOptions[currentFile][currentContract].options : null}
@@ -510,7 +525,7 @@ export function ContractDropdownUI(props: ContractDropdownProps) {
                 funcABI={constructorInterface}
                 clickCallBack={clickCallback}
                 inputs={constructorInputs}
-                widthClass="w-50"
+                widthClass={deployButtonWidthClass}
                 evmBC={loadedContractData.bytecodeObject}
                 lookupOnly={false}
                 proxy={props.proxy}
@@ -526,12 +541,6 @@ export function ContractDropdownUI(props: ContractDropdownProps) {
                 plugin={props.plugin}
                 runTabState={props.runTabState}
               />
-              {isNetworkSupported && (
-                <VerificationSettingsUI
-                  isVerifyChecked={isVerifyChecked}
-                  onVerifyCheckedChange={handleVerifyCheckedChange}
-                />
-              )}
             </div>
           )}
         </div>

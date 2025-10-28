@@ -1,9 +1,11 @@
-import React, { useState, useRef, useEffect, useReducer } from 'react' // eslint-disable-line
+import React, { useState, useRef, useEffect, useReducer, useContext } from 'react' // eslint-disable-line
 import { FormattedMessage, useIntl } from 'react-intl'
 import { diffLines } from 'diff'
 import { isArray } from 'lodash'
 import Editor, { DiffEditor, loader, Monaco } from '@monaco-editor/react'
-import { AppModal } from '@remix-ui/app'
+import { AppContext, AppModal } from '@remix-ui/app'
+import { MatomoEvent, EditorEvent, AIEvent } from '@remix-api'
+import { TrackingContext } from '@remix-ide/tracking'
 import { ConsoleLogs, EventManager, QueryParams } from '@remix-project/remix-lib'
 import { reducerActions, reducerListener, initialState } from './actions/editor'
 import { solidityTokensProvider, solidityLanguageConfig } from './syntaxes/solidity'
@@ -160,6 +162,11 @@ export interface EditorUIProps {
 const contextMenuEvent = new EventManager()
 export const EditorUI = (props: EditorUIProps) => {
   const intl = useIntl()
+  const appContext = useContext(AppContext)
+  const { trackMatomoEvent: baseTrackEvent } = useContext(TrackingContext)
+  const trackMatomoEvent = <T extends MatomoEvent = EditorEvent>(event: T) => {
+    baseTrackEvent?.<T>(event)
+  }
   const changedTypeMap = useRef<ChangeTypeMap>({})
   const pendingCustomDiff = useRef({})
   const [, setCurrentBreakpoints] = useState({})
@@ -205,21 +212,24 @@ export const EditorUI = (props: EditorUIProps) => {
 
   const formatColor = (name) => {
     let color = window.getComputedStyle(document.documentElement).getPropertyValue(name).trim()
-    if (color.length === 4) {
+    if (color.length === 4 && color.startsWith('#')) {
       color = color.concat(color.substr(1))
     }
     return color
   }
+
   const defineAndSetTheme = (monaco) => {
     const themeType = props.themeType === 'dark' ? 'vs-dark' : 'vs'
     const themeName = props.themeType === 'dark' ? 'remix-dark' : 'remix-light'
+    const isDark = props.themeType === 'dark'
+
     // see https://microsoft.github.io/monaco-editor/playground.html#customizing-the-appearence-exposed-colors
     const lightColor = formatColor('--bs-light')
     const infoColor = formatColor('--bs-info')
     const darkColor = formatColor('--bs-dark')
     const secondaryColor = formatColor('--bs-body-bg')
     const primaryColor = formatColor('--bs-primary')
-    const textColor = formatColor('--text') || darkColor
+    const textColor = formatColor('--bs-body-color') || darkColor
     const textbackground = formatColor('--bs-body-bg') || lightColor
     const blueColor = formatColor('--bs-blue')
     const successColor = formatColor('--bs-success')
@@ -347,7 +357,21 @@ export const EditorUI = (props: EditorUIProps) => {
   useEffect(() => {
     if (!monacoRef.current) return
     defineAndSetTheme(monacoRef.current)
-  })
+  }, [props.themeType]) // Only re-run when theme type changes
+
+  // Listen for theme changes to redefine the theme when CSS is loaded
+  useEffect(() => {
+    if (!monacoRef.current) return
+
+    const handleThemeChange = () => {
+      // Small delay to ensure CSS variables are available after theme switch
+      setTimeout(() => {
+        defineAndSetTheme(monacoRef.current)
+      }, 100)
+    }
+
+    props.plugin.on('theme', 'themeChanged', handleThemeChange)
+  }, [monacoRef.current])
 
   useEffect(() => {
     props.plugin.on('fileManager', 'currentFileChanged', (file: string) => {
@@ -451,7 +475,7 @@ export const EditorUI = (props: EditorUIProps) => {
     }
   }, [props.currentFile, props.isDiff])
 
-  const inlineCompletionProvider = new RemixInLineCompletionProvider(props, monacoRef.current)
+  const inlineCompletionProvider = new RemixInLineCompletionProvider(props, monacoRef.current, trackMatomoEvent)
 
   const convertToMonacoDecoration = (decoration: lineText | sourceAnnotation | sourceMarker, typeOfDecoration: string) => {
     if (typeOfDecoration === 'sourceAnnotationsPerFile') {
@@ -773,7 +797,7 @@ export const EditorUI = (props: EditorUIProps) => {
               setTimeout(async () => {
                 props.plugin.call('remixAI', 'chatPipe', 'vulnerability_check', pastedCodePrompt)
               }, 500)
-              _paq.push(['trackEvent', 'ai', 'remixAI', 'vulnerability_check_pasted_code'])
+              trackMatomoEvent<AIEvent>({ category: 'ai', action: 'remixAI', name: 'vulnerability_check_pasted_code', isClick: true })
             })();
           }
         };
@@ -830,7 +854,7 @@ export const EditorUI = (props: EditorUIProps) => {
           )
         }
         props.plugin.call('notification', 'modal', modalContent)
-        _paq.push(['trackEvent', 'editor', 'onDidPaste', 'more_than_10_lines'])
+        trackMatomoEvent({ category: 'editor', action: 'onDidPaste', name: 'more_than_10_lines', isClick: false })
       }
     })
 
@@ -841,7 +865,7 @@ export const EditorUI = (props: EditorUIProps) => {
         if (changes.some(change => change.text === inlineCompletionProvider.currentCompletion.item.insertText)) {
           inlineCompletionProvider.currentCompletion.onAccepted()
           inlineCompletionProvider.currentCompletion.accepted = true
-          _paq.push(['trackEvent', 'ai', 'remixAI', 'Copilot_Completion_Accepted'])
+          trackMatomoEvent<AIEvent>({ category: 'ai', action: 'remixAI', name: 'Copilot_Completion_Accepted', isClick: true })
         }
       }
     });
@@ -977,7 +1001,7 @@ export const EditorUI = (props: EditorUIProps) => {
               }, 150)
             }
           }
-          _paq.push(['trackEvent', 'ai', 'remixAI', 'generateDocumentation'])
+          trackMatomoEvent<AIEvent>({ category: 'ai', action: 'remixAI', name: 'generateDocumentation', isClick: true })
         },
       }
     }
@@ -996,7 +1020,7 @@ export const EditorUI = (props: EditorUIProps) => {
         setTimeout(async () => {
           await props.plugin.call('remixAI' as any, 'chatPipe', 'code_explaining', message, context)
         }, 500)
-        _paq.push(['trackEvent', 'ai', 'remixAI', 'explainFunction'])
+        trackMatomoEvent<AIEvent>({ category: 'ai', action: 'remixAI', name: 'explainFunction', isClick: true })
       },
     }
 
@@ -1020,7 +1044,7 @@ export const EditorUI = (props: EditorUIProps) => {
         setTimeout(async () => {
           await props.plugin.call('remixAI' as any, 'chatPipe', 'code_explaining', selectedCode, content, pipeMessage)
         }, 500)
-        _paq.push(['trackEvent', 'ai', 'remixAI', 'explainFunction'])
+        trackMatomoEvent<AIEvent>({ category: 'ai', action: 'remixAI', name: 'explainFunction', isClick: true })
       },
     }
 

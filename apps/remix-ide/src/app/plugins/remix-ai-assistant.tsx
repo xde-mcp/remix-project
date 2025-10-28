@@ -4,6 +4,7 @@ import * as packageJson from '../../../../../package.json'
 import { PluginViewWrapper } from '@remix-ui/helper'
 import { ChatMessage, RemixUiRemixAiAssistant, RemixUiRemixAiAssistantHandle } from '@remix-ui/remix-ai-assistant'
 import { EventEmitter } from 'events'
+import { trackMatomoEvent } from '@remix-api'
 
 const profile = {
   name: 'remixaiassistant',
@@ -19,7 +20,7 @@ const profile = {
   events: [],
   methods: ['chatPipe']
 }
-const _paq = (window._paq = window._paq || [])
+
 export class RemixAIAssistant extends ViewPlugin {
   element: HTMLDivElement
   dispatch: React.Dispatch<any> = () => { }
@@ -101,7 +102,9 @@ export class RemixAIAssistant extends ViewPlugin {
   }
 
   async handleActivity(type: string, payload: any) {
-    (window as any)._paq?.push(['trackEvent', 'remixai-assistant', `${type}-${payload}`])
+    // Never log user prompts - only track the activity type
+    const eventName = type === 'promptSend' ? 'remixai-assistant-promptSend' : `remixai-assistant-${type}-${payload}`;
+    trackMatomoEvent(this, { category: 'ai', action: 'remixAI', name: eventName as any, isClick: true })
   }
 
   updateComponent(state: {
