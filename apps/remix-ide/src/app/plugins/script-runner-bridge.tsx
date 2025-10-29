@@ -36,44 +36,58 @@ const customBuildUrl = 'http://localhost:4000/build' // this will be used when t
  * @returns The transformed script content.
  */
 function transformScriptForRuntime(scriptContent: string, builtInDependencies: string[] = []): string {
-  // Helper function for dynamic import (for loading new external libraries).
   const dynamicImportHelper = `const dynamicImport = (p) => new Function(\`return import('https://cdn.jsdelivr.net/npm/\${p}/+esm')\`)();\n`
+  const importRegex = /import\s+(.*?)\s+from\s+['"]([^'"]+)['"]/g
 
-  // Regex to find only NPM package imports (not relative paths starting with './', '../', '/').
-  const importRegex = /import\s+(.*?)\s+from\s+['"]((?![\.\/])[\w@\/\.-]+)['"]/g
+  const staticImports = []
+  const dynamicImports = []
 
-  // Flag to track if an async IIFE wrapper is needed.
-  let needsAsyncWrapper = false
-
-  const transformed = scriptContent.replace(importRegex, (match, importClause, packageName) => {
-    // Case 1: If it's a built-in dependency -> Return the original import statement (no transform).
+  const scriptBody = scriptContent.replace(importRegex, (match, importClause, packageName) => {
+    if (packageName.startsWith('.') || packageName.startsWith('/')) {
+      staticImports.push(match)
+      return ''
+    }
+    
     if (builtInDependencies.includes(packageName)) {
-      console.log(`[DIAG-TRANSFORM] Keeping built-in import: '${match}'`)
-      return match
+      staticImports.push(match)
+      return ''
     }
-
-    // Case 2: If it's NOT a built-in dependency (new external library) -> Transform to dynamic CDN import.
-    console.log(`[DIAG-TRANSFORM] Transforming external import: '${match}'`)
-    needsAsyncWrapper = true 
-    if (importClause.startsWith('{')) {
-      return `const ${importClause} = await dynamicImport("${packageName}");`
-    } else if (importClause.startsWith('* as')) {
-      const alias = importClause.split('as ')[1]
-      return `const ${alias} = await dynamicImport("${packageName}");`
-    } else {
-      return `const ${importClause} = (await dynamicImport("${packageName}")).default || await dynamicImport("${packageName}");`
-    }
+    
+    dynamicImports.push({ importClause, packageName })
+    return ''
   })
 
-  // If at least one dynamic import transformation occurred, wrap the entire script in an async IIFE.
-  if (needsAsyncWrapper) {
-    // Remove export statements as they are not valid inside an IIFE.
-    const finalTransformed = transformed.replace(/^export\s+/gm, '')
-    return `${dynamicImportHelper}\n(async () => {\n  try {\n${finalTransformed}\n  } catch (e) { console.error('Error executing script:', e); }\n})();`
-  } else {
-    // If no dynamic imports were needed, return the original script as is (no wrapper).
-    return transformed
+  let finalScript = ''
+  
+  if (staticImports.length > 0) {
+    finalScript += staticImports.join('\n') + '\n\n'
+    console.log('[DIAG-TRANSFORM] Keeping static imports:\n', staticImports.join('\n'))
   }
+
+  finalScript += `${dynamicImportHelper}\n(async () => {\n  try {\n`
+
+  if (dynamicImports.length > 0) {
+    const dynamicTransforms = []
+    for (const info of dynamicImports) {
+      if (info.importClause.startsWith('{')) {
+        dynamicTransforms.push(`    const ${info.importClause} = await dynamicImport("${info.packageName}");`)
+      } else if (info.importClause.startsWith('* as')) {
+        const alias = info.importClause.split('as ')[1]
+        dynamicTransforms.push(`    const ${alias} = await dynamicImport("${info.packageName}");`)
+      } else {
+        dynamicTransforms.push(`    const ${info.importClause} = (await dynamicImport("${info.packageName}")).default || await dynamicImport("${info.packageName}");`)
+      }
+    }
+    finalScript += dynamicTransforms.join('\n') + '\n\n'
+    console.log('[DIAG-TRANSFORM] Added dynamic imports:\n', dynamicTransforms.join('\n'))
+  }
+
+  const finalScriptBody = scriptBody.replace(/^export\s+/gm, '')
+  finalScript += finalScriptBody
+
+  finalScript += `\n  } catch (e) { console.error('Error executing script:', e); }\n})();`
+
+  return finalScript
 }
 
 export class ScriptRunnerBridgePlugin extends Plugin {
