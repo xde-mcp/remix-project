@@ -35,80 +35,46 @@ const customBuildUrl = 'http://localhost:4000/build' // this will be used when t
  * @param preBundledDeps An array of dependency objects for the active runner.
  * @returns The transformed script content.
  */
-function transformScriptForRuntime(scriptContent: string, preBundledDeps: ProjectConfiguration['dependencies'] = []): string {
-  const depNames = preBundledDeps.map(dep => dep.name)
+function transformScriptForRuntime(scriptContent: string, builtInDependencies: string[] = []): string {
+  // Helper function for dynamic import (for loading new external libraries).
+  const dynamicImportHelper = `const dynamicImport = (p) => new Function(\`return import('https://cdn.jsdelivr.net/npm/\${p}/+esm')\`)();\n`
 
-  // This is an exception list for pre-bundled libraries whose 'import' statements should be left as is.
-  const STATIC_TRANSFORM_EXCEPTIONS = [
-    '@noir-lang/noir_wasm',
-    '@noir-lang/noir_js',
-    '@aztec/bb.js'
-  ]
+  // Regex to find only NPM package imports (not relative paths starting with './', '../', '/').
+  const importRegex = /import\s+(.*?)\s+from\s+['"]((?![\.\/])[\w@\/\.-]+)['"]/g
 
-  // Check for external library imports (not pre-bundled) to determine if an async IIFE wrapper is needed.
-  const externalImportRegex = /import\s+[\s\S]*?\s+from\s+['"]((?!\.\.?\/)[^'"]+)['"]/g
+  // Flag to track if an async IIFE wrapper is needed.
   let needsAsyncWrapper = false
-  let match
-  while ((match = externalImportRegex.exec(scriptContent)) !== null) {
-    if (!depNames.includes(match[1])) {
-      needsAsyncWrapper = true
-      break
+
+  const transformed = scriptContent.replace(importRegex, (match, importClause, packageName) => {
+    // Case 1: If it's a built-in dependency -> Return the original import statement (no transform).
+    if (builtInDependencies.includes(packageName)) {
+      console.log(`[DIAG-TRANSFORM] Keeping built-in import: '${match}'`)
+      return match
     }
-  }
 
-  let transformed = scriptContent.replace(
-    /import\s+(?:({[\s\S]*?})|([\w\d_$]+)|(\*\s+as\s+[\w\d_$]+))\s+from\s+['"]([^'"]+)['"]/g,
-    (fullMatch, namedMembers, defaultMember, namespaceMember, pkg) => {
-      // Case 1: Transform relative path imports to require().
-      if (pkg.startsWith('./') || pkg.startsWith('../')) {
-        const members = namedMembers || defaultMember || (namespaceMember ? namespaceMember.replace('* as', '').trim() : '')
-        return members ? `const ${members} = require("${pkg}");` : `require("${pkg}");`
-      }
-
-      const depInfo = preBundledDeps.find(dep => dep.name === pkg)
-
-      if (depInfo) {
-        // Case 2: Handling pre-bundled libraries.
-        // If the library is in the exception list (e.g., noir), return the original import statement.
-        if (STATIC_TRANSFORM_EXCEPTIONS.includes(pkg)) {
-          return fullMatch
-        }
-
-        // Only when the async wrapper is needed, transform to use the 'window' global object as an emergency measure.
-        if (needsAsyncWrapper) {
-          const members = namedMembers || defaultMember || (namespaceMember ? namespaceMember.replace('* as', '').trim() : '')
-          
-          // Since namedMembers includes braces like '{ ethers }', we can use it directly.
-          return members ? `const ${members} = require("${pkg}");` : `const ${pkg} = require("${pkg}");`
-        }
-        
-        return fullMatch
-      }
-
-      if (defaultMember) {
-        return `const _${defaultMember}_module = await dynamicImport("${pkg}"); const ${defaultMember} = _${defaultMember}_module.default || _${defaultMember}_module;`
-      }
-      
-      // Case 3: Transform external libraries using dynamicImport().
-      const members = namedMembers || defaultMember || (namespaceMember ? namespaceMember.replace('* as', '').trim() : null)
-      if (defaultMember) return `const ${defaultMember} = (await dynamicImport("${pkg}")).default`
-      if (members) return `const ${members} = await dynamicImport("${pkg}")`
-      
-      return fullMatch
+    // Case 2: If it's NOT a built-in dependency (new external library) -> Transform to dynamic CDN import.
+    console.log(`[DIAG-TRANSFORM] Transforming external import: '${match}'`)
+    needsAsyncWrapper = true 
+    if (importClause.startsWith('{')) {
+      return `const ${importClause} = await dynamicImport("${packageName}");`
+    } else if (importClause.startsWith('* as')) {
+      const alias = importClause.split('as ')[1]
+      return `const ${alias} = await dynamicImport("${packageName}");`
+    } else {
+      return `const ${importClause} = (await dynamicImport("${packageName}")).default || await dynamicImport("${packageName}");`
     }
-  )
+  })
 
-  // Wrap the entire script in an async IIFE only when external libraries are used.
+  // If at least one dynamic import transformation occurred, wrap the entire script in an async IIFE.
   if (needsAsyncWrapper) {
-    const dynamicImportHelper = `const dynamicImport = (p) => new Function(\`return import('https://cdn.jsdelivr.net/npm/\${p}/+esm')\`)();\n`
-
-    transformed = transformed.replace(/^export\s+/gm, '')
-    return `${dynamicImportHelper}\n(async () => {\n  try {\n${transformed}\n  } catch (e) { console.error('Error executing script:', e) }\n})()`
+    // Remove export statements as they are not valid inside an IIFE.
+    const finalTransformed = transformed.replace(/^export\s+/gm, '')
+    return `${dynamicImportHelper}\n(async () => {\n  try {\n${finalTransformed}\n  } catch (e) { console.error('Error executing script:', e); }\n})();`
+  } else {
+    // If no dynamic imports were needed, return the original script as is (no wrapper).
+    return transformed
   }
-
-  return transformed
 }
-
 
 export class ScriptRunnerBridgePlugin extends Plugin {
   engine: Engine
@@ -286,7 +252,8 @@ export class ScriptRunnerBridgePlugin extends Plugin {
     try {
       this.setIsLoading(this.activeConfig.name, true)
        // Transforms the script into an executable format using the function defined above.
-      const transformedScript = transformScriptForRuntime(script, this.activeConfig.dependencies)
+      const builtInDependencies = this.activeConfig.dependencies ? this.activeConfig.dependencies.map(dep => dep.name) : []
+      const transformedScript = transformScriptForRuntime(script, builtInDependencies)
 
       console.log('--- [ScriptRunner] Original Script ---')
       console.log(script)
