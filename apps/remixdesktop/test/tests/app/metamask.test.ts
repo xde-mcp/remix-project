@@ -1,5 +1,12 @@
 import { NightwatchBrowser } from 'nightwatch'
 
+function openTemplatesExplorer(browser: NightwatchBrowser) {
+  browser
+    .click('*[data-id="workspacesSelect"]')
+    .click('*[data-id="workspacecreate"]')
+    .waitForElementPresent('*[data-id="create-remixDefault"]')
+}
+
 const tests = {
   before: function (browser: NightwatchBrowser, done: VoidFunction) {
     browser.hideToolTips()
@@ -7,16 +14,19 @@ const tests = {
   },
   'open default template': function (browser: NightwatchBrowser) {
     browser
+      .hideToolTips()
       .waitForElementVisible('*[data-id="remixIdeIconPanel"]', 10000)
-      .waitForElementVisible('button[data-id="landingPageImportFromTemplate"]')
-      .click('button[data-id="landingPageImportFromTemplate"]')
-      .waitForElementPresent('*[data-id="create-remixDefault"]')
+
+    openTemplatesExplorer(browser)
+
+    browser
       .scrollAndClick('*[data-id="create-remixDefault"]')
       .pause(3000)
       .windowHandles(function (result) {
         console.log(result.value)
         browser.hideToolTips()
           .switchWindow(result.value[1])
+          .hideToolTips()
           .waitForElementVisible('*[data-id="treeViewLitreeViewItemtests"]')
           .click('*[data-id="treeViewLitreeViewItemtests"]')
           .waitForElementVisible('*[data-id="treeViewLitreeViewItemcontracts"]')

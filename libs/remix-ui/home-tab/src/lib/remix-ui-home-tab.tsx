@@ -3,6 +3,7 @@ import './remix-ui-home-tab.css'
 import { ThemeContext, themes } from './themeContext'
 import HomeTabTitle from './components/homeTabTitle'
 import HomeTabRecentWorkspaces from './components/homeTabRecentWorkspaces'
+import HomeTabRecentWorkspacesElectron from './components/homeTabRecentWorkspacesElectron'
 import HomeTabScamAlert from './components/homeTabScamAlert'
 import HomeTabFeaturedPlugins from './components/homeTabFeaturedPlugins'
 import { AppContext, appPlatformTypes, platformContext } from '@remix-ui/app'
@@ -98,8 +99,7 @@ export const RemixUiHomeTab = (props: RemixUiHomeTabProps) => {
             </div>
             <div className="col-lg-8 col-xl-5 col-sm-12 mb-4">
               <HomeTabTitle />
-              <HomeTabRecentWorkspaces plugin={plugin} />
-              {/* {!(platform === appPlatformTypes.desktop) ? <HomeTabFile plugin={plugin} /> : <HomeTabFileElectron plugin={plugin}></HomeTabFileElectron>} */}
+              {!(platform === appPlatformTypes.desktop) ? <HomeTabRecentWorkspaces plugin={plugin} /> : <HomeTabRecentWorkspacesElectron plugin={plugin} />}
             </div>
             <div className="col-lg-4 col-xl-7 col-sm-12" style={{ overflowY: 'auto', maxHeight: '61vh' }}>
               <HomeTabUpdates plugin={plugin} />

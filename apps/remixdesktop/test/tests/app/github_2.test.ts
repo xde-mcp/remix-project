@@ -1,5 +1,12 @@
 import { NightwatchBrowser } from "nightwatch"
 
+function openTemplatesExplorer(browser: NightwatchBrowser) {
+  browser
+    .click('*[data-id="workspacesSelect"]')
+    .click('*[data-id="workspacecreate"]')
+    .waitForElementPresent('*[data-id="create-remixDefault"]')
+}
+
 const tests = {
   before: function (browser: NightwatchBrowser, done: VoidFunction) {
     browser.hideToolTips()
@@ -8,16 +15,18 @@ const tests = {
 
   'open default template': function (browser: NightwatchBrowser) {
     browser
+      .hideToolTips()
       .waitForElementVisible('*[data-id="remixIdeIconPanel"]', 10000)
-      .waitForElementVisible('button[data-id="landingPageImportFromTemplate"]')
-      .click('button[data-id="landingPageImportFromTemplate"]')
-      .waitForElementPresent('*[data-id="create-remixDefault"]')
-      .scrollAndClick('*[data-id="create-remixDefault"]')
 
+    openTemplatesExplorer(browser)
+
+    browser
+      .scrollAndClick('*[data-id="create-remixDefault"]')
       .pause(3000)
       .windowHandles(function (result) {
         console.log(result.value)
-        browser.switchWindow(result.value[1])
+        browser.hideToolTips().switchWindow(result.value[1])
+          .hideToolTips()
           .waitForElementVisible('*[data-id="treeViewLitreeViewItemtests"]')
       })
 
@@ -37,7 +46,6 @@ const tests = {
   },
   'login to github #group1 #group2': function (browser: NightwatchBrowser) {
     browser
-      .waitForElementVisible('*[data-id="github-panel"]')
       .waitForElementVisible('*[data-id="gitubUsername"]')
       .setValue('*[data-id="githubToken"]', process.env.DGIT_TOKEN)
       .pause(1000)
@@ -53,6 +61,13 @@ const tests = {
       .waitForElementVisible('*[data-id="connected-img-bunsenstraat"]')
       .waitForElementVisible('*[data-id="connected-link-bunsenstraat"]')
       .waitForElementVisible('*[data-id="remotes-panel"]')
+  },
+  'check the FE shows logged in user #group1 #group2': function (browser: NightwatchBrowser) {
+    browser
+      .waitForElementVisible({
+        selector: '//*[@data-id="github-dropdown-toggle-login"]//span[contains(text(), "bunsenstraat")]',
+        locateStrategy: 'xpath'
+      })
   },
   // 'check the FE for the auth user #group1 #group2': function (browser: NightwatchBrowser) {
   //   browser

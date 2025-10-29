@@ -1,6 +1,6 @@
 /**
  * AI Events - AI and Copilot related tracking events
- * 
+ *
  * This file contains all AI-related Matomo events including RemixAI interactions,
  * Ollama local AI, and code completion features.
  * 
@@ -14,9 +14,12 @@ import { MatomoEventBase } from '../core/base-types';
 
 export interface AIEvent extends MatomoEventBase {
   category: 'ai';
-  action: 'remixAI';
-  name:
-    // Code completion & generation
+  action:
+    | 'remixAI'
+    | 'error_explaining_SolidityError'
+    | 'vulnerability_check_pasted_code'
+    | 'generateDocumentation'
+    | 'explainFunction'
     | 'Copilot_Completion_Accepted'
     | 'code_generation'
     | 'code_insertion'
@@ -33,17 +36,9 @@ export interface AIEvent extends MatomoEventBase {
     | 'error_explaining_SolidityError'
     // AI Context
     | 'AddingAIContext'
-    // RemixAI workspace & chat
     | 'GenerateNewAIWorkspace'
-    | 'WorkspaceAgentEdit'
-    | 'remixAI_chat'
-    | 'GenerateNewAIWorkspaceFromEditMode'
-    | 'GenerateNewAIWorkspaceFromModal'
-    // AI Provider selection
-    | 'SetAIProvider'
-    | 'SetOllamaModel'
-    | 'ModeSwitch'
-    // Ollama host discovery
+    | 'chatting'
+    | 'completion'
     | 'ollama_host_cache_hit'
     | 'ollama_port_check'
     | 'ollama_host_discovered_success'
@@ -91,18 +86,9 @@ export interface AIEvent extends MatomoEventBase {
     | 'ollama_fallback_to_provider'
     | 'ollama_unavailable'
     | 'ollama_connection_error'
-    // Assistant feedback (kebab-case to match original)
-    | 'like-response'
-    | 'dislike-response';
-}
-
-/**
- * @deprecated Use AIEvent with category: 'ai', action: 'remixAI' instead
- * This interface is kept for backward compatibility during migration
- */
-export interface RemixAIEvent extends MatomoEventBase {
-  category: 'remixAI';
-  action:
+    | 'ollama_model_selected'
+    | 'ollama_model_set_backend_success'
+    | 'ollama_model_set_backend_failed'
     | 'ModeSwitch'
     | 'GenerateNewAIWorkspaceFromEditMode'
     | 'SetAIProvider'

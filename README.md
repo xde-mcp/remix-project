@@ -86,6 +86,15 @@ yarn run serve:production
 ```
 Production build will be served by default to `http://localhost:8080/` or `http://127.0.0.1:8080/`
 
+## Nx Cloud caching
+
+This repo uses Nx Cloud to speed up builds and keep CI deterministic via remote caching.
+
+- Configuration: `nx.json` uses the Nx Cloud runner and reads the token from the `NX_CLOUD_ACCESS_TOKEN` environment variable.
+- CI: CircleCI jobs automatically use `--cloud` when the token is present; for forked PRs (no secrets), they fall back to local-only caching. Build logs are stored under `logs/nx-build.log`.
+- Verifying locally: run the same target twice; the second run should print “Nx read the output from the cache”. Example: `nx run remix-ide:build` and run it again.
+- Insights: View cache analytics and run details at https://nx.app (links appear in Nx output when the token is configured).
+
 ## Docker:
 
 Prerequisites: 

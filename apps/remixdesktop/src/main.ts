@@ -44,19 +44,37 @@ export const createWindow = async (dir?: string): Promise<void> => {
   if (screen.getPrimaryDisplay().size.width < 2560 || screen.getPrimaryDisplay().size.height < 1440) {
     resizeFactor = 1
   }
-  const width = screen.getPrimaryDisplay().size.width * resizeFactor
-  const height = screen.getPrimaryDisplay().size.height * resizeFactor
+  const windowWidth = Math.round(screen.getPrimaryDisplay().size.width * resizeFactor)
+  const windowHeight = Math.round(screen.getPrimaryDisplay().size.height * resizeFactor)
 
   // Create the browser window.
   const mainWindow = new BrowserWindow({
-    width: (isE2E ? 2560 : width),
-    height: (isE2E ? 1140 : height),
+    // For normal use, start at ~80% of the primary display; E2E will maximize anyway
+    width: windowWidth,
+    height: windowHeight,
+    minWidth: 1024,
+    minHeight: 650,
     frame: true,
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js')
-
+      preload: path.join(__dirname, 'preload.js'),
+      // Hint an initial zoom; Electron applies this at creation time
+      zoomFactor: (isE2E ? 0.5 : 1.0),
     },
   });
+  
+  // Ensure zoom is applied after content loads (some pages reset it on load)
+  if (isE2E) {
+    const applyZoom = () => {
+      try { mainWindow.webContents.setZoomFactor(0.5); } catch (_) {}
+    };
+    // Apply once the first load finishes
+    mainWindow.webContents.once('did-finish-load', applyZoom);
+    // Re-apply on any navigation within the window (SPA route changes, reloads)
+    mainWindow.webContents.on('did-navigate-in-page', applyZoom);
+    mainWindow.webContents.on('did-navigate', applyZoom);
+  }
+  
+  
   mainWindow.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url); // Open URL in user's browser.
     return { action: "deny" }; // Prevent the app from opening the URL.
@@ -286,14 +304,10 @@ ipcMain.handle('config:isE2E', async () => {
   return isE2E
 })
 
-ipcMain.handle('config:canTrackMatomo', async (event, name: string) => {
-  console.log('config:canTrackMatomo', ((process.env.NODE_ENV === 'production' || isPackaged) && !isE2E))
-  return ((process.env.NODE_ENV === 'production' || isPackaged) && !isE2E)
-})
-
 ipcMain.handle('matomo:trackEvent', async (event, data) => {
   if (data && data[0] && data[0] === 'trackEvent') {
-    trackEvent(data[1], data[2], data[3], data[4])
+    // data[5] is isClick (optional)
+    trackEvent(data[1], data[2], data[3], data[4], 0, data[5]);
   }
 })
 

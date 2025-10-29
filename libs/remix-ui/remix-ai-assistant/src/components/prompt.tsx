@@ -4,7 +4,7 @@ import GroupListMenu from "./contextOptMenu"
 import { AiContextType, groupListType } from '../types/componentTypes'
 import { AiAssistantType } from '../types/componentTypes'
 import { CustomTooltip } from "@remix-ui/helper"
-import { RemixAIEvent, MatomoEvent } from '@remix-api';
+import { AIEvent, MatomoEvent } from '@remix-api';
 import { TrackingContext } from '@remix-ide/tracking'
 
 // PromptArea component
@@ -84,7 +84,7 @@ export const PromptArea: React.FC<PromptAreaProps> = ({
   setIsMaximized
 }) => {
   const { trackMatomoEvent: baseTrackEvent } = useContext(TrackingContext)
-  const trackMatomoEvent = <T extends MatomoEvent = RemixAIEvent>(event: T) => {
+  const trackMatomoEvent = <T extends MatomoEvent = AIEvent>(event: T) => {
     baseTrackEvent?.<T>(event)
   }
 
@@ -129,7 +129,7 @@ export const PromptArea: React.FC<PromptAreaProps> = ({
                 className={`btn btn-sm ${aiMode === 'ask' ? 'btn-primary' : 'btn-outline-secondary'} px-2`}
                 onClick={() => {
                   setAiMode('ask')
-                  trackMatomoEvent({ category: 'ai', action: 'remixAI', name: 'ModeSwitch', value: 'ask', isClick: true })
+                  trackMatomoEvent({ category: 'ai', action: 'ModeSwitch', name: 'ask', isClick: true })
                 }}
                 title="Ask mode - Chat with AI"
               >
@@ -140,7 +140,7 @@ export const PromptArea: React.FC<PromptAreaProps> = ({
                 className={`btn btn-sm ${aiMode === 'edit' ? 'btn-primary' : 'btn-outline-secondary'} px-2`}
                 onClick={() => {
                   setAiMode('edit')
-                  trackMatomoEvent({ category: 'ai', action: 'remixAI', name: 'ModeSwitch', value: 'edit', isClick: true })
+                  trackMatomoEvent({ category: 'ai', action: 'ModeSwitch', name: 'edit', isClick: true })
                 }}
                 title="Edit mode - Edit workspace code"
               >

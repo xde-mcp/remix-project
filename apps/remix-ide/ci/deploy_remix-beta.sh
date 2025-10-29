@@ -4,8 +4,7 @@ set -e
 SHA=`git rev-parse --short --verify HEAD`
 
 # this gh action is used to deploy the build to the gh pages
-mkdir dist/apps/remix-ide/.github
-mkdir dist/apps/remix-ide/.github/workflows
+mkdir -p dist/apps/remix-ide/.github/workflows
 cp apps/remix-ide/ci/gh-actions-deploy.yml dist/apps/remix-ide/.github/workflows
 
 cd dist/apps/remix-ide
@@ -23,4 +22,4 @@ zip -r remix-$SHA.zip .
 git add .
 git commit -m "Built website from {$SHA}."
 
-git push -f git@github.com:remix-project-org/remix-live-alpha.git gh-pages
+git push -f git@github.com:remix-project-org/remix-live-beta.git gh-pages

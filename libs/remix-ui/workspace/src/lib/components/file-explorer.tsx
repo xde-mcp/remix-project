@@ -48,7 +48,7 @@ export const FileExplorer = (props: FileExplorerProps) => {
   const treeRef = useRef<HTMLDivElement>(null)
   const [cutActivated, setCutActivated] = useState(false)
 
-  const { plugin } = useContext(FileSystemContext)
+  const { plugin, dispatchRevealElectronFolderInExplorer } = useContext(FileSystemContext)
   const appContext = useContext(AppContext)
   const { trackMatomoEvent: baseTrackEvent } = useContext(TrackingContext)
   const trackMatomoEvent = <T extends FileExplorerEvent = FileExplorerEvent>(event: T) => baseTrackEvent?.<T>(event)
@@ -622,6 +622,7 @@ export const FileExplorer = (props: FileExplorerProps) => {
                   importFromIpfs={props.importFromIpfs}
                   importFromHttps={props.importFromHttps}
                   handleGitInit={handleGitInit}
+                  revealInExplorer={() => dispatchRevealElectronFolderInExplorer(null)}
                 />
               </div>
             </span>

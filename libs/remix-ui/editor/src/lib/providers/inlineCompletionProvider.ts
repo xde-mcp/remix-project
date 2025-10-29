@@ -2,7 +2,7 @@
 import { EditorUIProps, monacoTypes } from '@remix-ui/editor';
 import { CompletionParams } from '@remix/remix-ai-core';
 import { trackMatomoEvent, AIEvent, MatomoEvent } from '@remix-api'
-import * as monaco from 'monaco-editor';
+// Do not import monaco runtime here to avoid bundling it. Use types and the injected instance instead.
 import {
   AdaptiveRateLimiter,
   SmartContextDetector,
@@ -208,7 +208,7 @@ export class RemixInLineCompletionProvider implements monacoTypes.languages.Inli
     const parsedData = data.trimStart()
     const item: monacoTypes.languages.InlineCompletion = {
       insertText: parsedData,
-      range: new monaco.Range(position.lineNumber, position.column, position.lineNumber, position.column)
+      range: new monacoTypes.Range(position.lineNumber, position.column, position.lineNumber, position.column)
     };
 
     this.currentCompletion.text = parsedData
@@ -234,7 +234,7 @@ export class RemixInLineCompletionProvider implements monacoTypes.languages.Inli
       this.task = 'code_insertion'
       const item: monacoTypes.languages.InlineCompletion = {
         insertText: generatedText,
-        range: new monaco.Range(position.lineNumber, position.column, position.lineNumber, position.column)
+        range: new monacoTypes.Range(position.lineNumber, position.column, position.lineNumber, position.column)
       };
 
       this.currentCompletion.text = generatedText
@@ -271,7 +271,7 @@ export class RemixInLineCompletionProvider implements monacoTypes.languages.Inli
 
       const item: monacoTypes.languages.InlineCompletion = {
         insertText: clean,
-        range: new monaco.Range(position.lineNumber, position.column, position.lineNumber, position.column)
+        range: new monacoTypes.Range(position.lineNumber, position.column, position.lineNumber, position.column)
       };
 
       this.currentCompletion.text = clean
@@ -307,7 +307,7 @@ export class RemixInLineCompletionProvider implements monacoTypes.languages.Inli
     this.currentCompletion.task = this.task
 
     this.rateLimiter.trackCompletionShown()
-    this.trackMatomoEvent?.({ category: 'ai', action: 'remixAI', name: `${this.task}_did_show` as any, isClick: true })
+    this.trackMatomoEvent?.({ category: 'ai', action: 'completion', name: this.task + '_did_show', isClick: true })
   }
 
   handlePartialAccept?(
@@ -319,7 +319,7 @@ export class RemixInLineCompletionProvider implements monacoTypes.languages.Inli
     this.currentCompletion.task = this.task
 
     this.rateLimiter.trackCompletionAccepted()
-    this.trackMatomoEvent?.({ category: 'ai', action: 'remixAI', name: `${this.task}_partial_accept` as any, isClick: true })
+    this.trackMatomoEvent?.({ category: 'ai', action: 'completion', name: this.task + '_partial_accept', isClick: true })
   }
 
   freeInlineCompletions(

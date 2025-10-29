@@ -1,13 +1,13 @@
 /**
  * Matomo Events - Modular Event System
- * 
+ *
  * This is the main index for the split Matomo event system. 
  * It re-exports all events to maintain backward compatibility while 
  * organizing the code into manageable modules.
- * 
+ *
  * Usage:
  *   import { trackMatomoEvent } from '@remix-api'
- *   
+ *
  *   trackMatomoEvent(plugin, { category: 'ai', action: 'remixAI', name: 'code_generation', isClick: true })
  *   trackMatomoEvent(plugin, { category: 'git', action: 'COMMIT', name: 'success', isClick: true })
  */
@@ -18,7 +18,7 @@ export * from './core/categories';
 
 // Event modules - organized by domain
 export * from './events/ai-events';
-export * from './events/compiler-events'; 
+export * from './events/compiler-events';
 export * from './events/git-events';
 export * from './events/ui-events';
 export * from './events/file-events';
@@ -27,7 +27,7 @@ export * from './events/plugin-events';
 export * from './events/tools-events';
 
 // Import types for union
-import type { AIEvent, RemixAIEvent, RemixAIAssistantEvent } from './events/ai-events';
+import type { AIEvent, RemixAIAssistantEvent } from './events/ai-events';
 import type { CompilerEvent, SolidityCompilerEvent, CompilerContainerEvent } from './events/compiler-events';
 import type { GitEvent } from './events/git-events';
 import type { HomeTabEvent, TopbarEvent, LayoutEvent, SettingsEvent, ThemeEvent, LocaleEvent, LandingPageEvent, StatusBarEvent } from './events/ui-events';
@@ -40,17 +40,16 @@ import type { DebuggerEvent, EditorEvent, SolidityUnitTestingEvent, SolidityStat
 export type MatomoEvent = (
   // AI & Assistant events
   | AIEvent
-  | RemixAIEvent
   | RemixAIAssistantEvent
-  
+
   // Compilation events
   | CompilerEvent
   | SolidityCompilerEvent
   | CompilerContainerEvent
-  
+
   // Version Control events
   | GitEvent
-  
+
   // User Interface events
   | HomeTabEvent
   | TopbarEvent
@@ -66,12 +65,12 @@ export type MatomoEvent = (
   | WorkspaceEvent
   | StorageEvent
   | BackupEvent
-  
+
   // Blockchain & Contract events
   | BlockchainEvent
   | UdappEvent
   | RunEvent
-  
+
   // Plugin Management events
   | PluginEvent
   | ManagerEvent
@@ -80,7 +79,7 @@ export type MatomoEvent = (
   | MatomoManagerEvent
   | PluginPanelEvent
   | MigrateEvent
-  
+
   // Development Tools events
   | DebuggerEvent
   | EditorEvent
@@ -99,7 +98,7 @@ export type MatomoEvent = (
   | NoirCompilerEvent
   | ContractVerificationEvent
   | LearnethEvent
-  
+
 ) & {
   // Ensure all events have these base properties for backward compatibility
   name?: string;
