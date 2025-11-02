@@ -154,10 +154,57 @@ jobs:
             set -e
             tar -cf remix-dist.tar dist/apps/remix-ide dist/apps/remix-ide-e2e dist/apps/remix-ide/assets/js/soljson dist/libs 2>/dev/null || true
             gzip -1 remix-dist.tar
+      - run:
+          name: Fetch CircleCI timings for shard planning (best effort)
+          command: |
+            if [ -n "${CIRCLECI_TOKEN:-}" ]; then
+              echo "Fetching timings for branch ${CIRCLE_BRANCH:-all}..."
+              yarn ci:timings --slug gh/remix-project-org/remix-project --workflow web --branch "${CIRCLE_BRANCH:-}" --limit 30 --json timings-current.json || true
+              if [ ! -s timings-current.json ] || [ "$(jq -r '.files | length' timings-current.json 2>/dev/null || echo 0)" -eq 0 ]; then
+                echo "No timings for current branch; falling back to master"
+                yarn ci:timings --slug gh/remix-project-org/remix-project --workflow web --branch master --limit 30 --json timings-current.json || true
+              fi
+            else
+              echo "CIRCLECI_TOKEN not set; shard planning will use median defaults."
+            fi
+      - run:
+          name: Precompute and cache E2E shard splits
+          command: |
+            set -e
+            PARALLEL=<< pipeline.parameters.e2e_parallelism >>
+            COMMIT_SHA=${CIRCLE_SHA1:-unknown}
+            CACHE_PREFIX="reports/shards/cache/${COMMIT_SHA}-shards${PARALLEL}"
+            mkdir -p "$CACHE_PREFIX" reports/shards
+            echo "Enumerating enabled test basenames from dist..."
+            TEST_NAMES=$(find dist/apps/remix-ide-e2e/src/tests -type f \( -name "*.test.js" -o -name "*.spec.js" \) -print0 \
+              | xargs -0 grep -IL "@disabled" \
+              | xargs -I {} basename {} \
+              | sed 's/\.js$//' \
+              | grep -v metamask)
+            COUNT=$(printf '%s\n' "$TEST_NAMES" | wc -l | awk '{print $1}')
+            echo "Found $COUNT enabled tests. Planning for $PARALLEL shard(s)."
+            # Generate a manifest (index 0 is arbitrary; manifest includes all bins)
+            printf '%s\n' "$TEST_NAMES" | node scripts/plan-shards.js \
+              --shards "$PARALLEL" \
+              --index 0 \
+              --timings timings-current.json \
+              --manifest-out "${CACHE_PREFIX}/manifest.json" \
+              --verbose > /dev/null || true
+            # Generate per-shard file lists deterministically
+            for i in $(seq 0 $((PARALLEL-1))); do
+              OUT=$(printf '%s\n' "$TEST_NAMES" | node scripts/plan-shards.js --shards "$PARALLEL" --index "$i" --timings timings-current.json)
+              printf '%s\n' "$OUT" > "${CACHE_PREFIX}/files-$i.txt"
+            done
+            echo "Precomputed shard files saved under $CACHE_PREFIX"
+      - save_cache:
+          key: v1-shards-{{ .Environment.CIRCLE_SHA1 }}-<< pipeline.parameters.e2e_parallelism >>
+          paths:
+            - reports/shards/cache
       - persist_to_workspace:
           root: .
           paths:
             - remix-dist.tar.gz
+            - reports/shards
 
   build-plugin:
     docker:
@@ -283,6 +330,9 @@ jobs:
       - restore_cache:
           keys:
             - v1-deps-{{ checksum "yarn.lock" }}
+      - restore_cache:
+          keys:
+            - v1-shards-{{ .Environment.CIRCLE_SHA1 }}-<< pipeline.parameters.e2e_parallelism >>
       - run: yarn
       - run:
           name: Unpack dist from workspace
