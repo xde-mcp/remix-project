@@ -255,6 +255,7 @@ export default class Editor extends Plugin {
       this.toggleTsDiagnostics(false)
       this.triggerEvent('typesLoading', ['start'])
       console.log('[DIAGNOSE-BATCH] Types batch started')
+      this.call('notification', 'toast', 'Loading JS/TS type information...')
     }
     this.typesLoadingCount++
   }
@@ -266,6 +267,7 @@ export default class Editor extends Plugin {
       this.toggleTsDiagnostics(true)
       this.triggerEvent('typesLoading', ['end'])
       console.log('[DIAGNOSE-BATCH] Types batch ended')
+      this.call('notification', 'toast', 'JS/TS types loaded successfully.')
     }
   }
 
