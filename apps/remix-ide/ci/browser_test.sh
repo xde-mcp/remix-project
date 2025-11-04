@@ -18,6 +18,15 @@ SELF_SPLIT=${SELF_SPLIT:-0}
 TIMINGS_JSON=${TIMINGS_JSON:-timings-current.json}
 E2E_RETRIES=${E2E_RETRIES:-0} # number of retries on failure per test (0 = no retry)
 
+# Cache key components for deterministic shard reuse (e.g., on CircleCI reruns)
+# - Keyed by commit SHA and shard count; includes shard index per file
+COMMIT_SHA=${CIRCLE_SHA1:-$(git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)}
+SHARD_CACHE_DIR=${SHARD_CACHE_DIR:-reports/shards/cache}
+SHARD_CACHE_KEY="${COMMIT_SHA}-shards${PARALLEL_TOTAL}"
+SHARD_CACHE_PREFIX="${SHARD_CACHE_DIR}/${SHARD_CACHE_KEY}"
+SHARD_CACHE_FILE="${SHARD_CACHE_PREFIX}/files-${PARALLEL_INDEX}.txt"
+SHARD_MANIFEST_FILE="${SHARD_CACHE_PREFIX}/manifest.json"
+
 # Build the list of enabled test files
 BASE_FILES=$(find dist/apps/remix-ide-e2e/src/tests -type f \( -name "*.test.js" -o -name "*.spec.js" \) -print0 \
   | xargs -0 grep -IL "@disabled" \
@@ -25,15 +34,35 @@ BASE_FILES=$(find dist/apps/remix-ide-e2e/src/tests -type f \( -name "*.test.js"
   | sed 's/\.js$//' \
   | grep -v 'metamask')
 
-if [ "$SELF_SPLIT" = "1" ]; then
-  echo "==> Using self shard planner (shards=$PARALLEL_TOTAL index=$PARALLEL_INDEX)"
-  echo "ENV: CIRCLE_BRANCH=${CIRCLE_BRANCH:-local} CIRCLE_NODE_TOTAL=$PARALLEL_TOTAL CIRCLE_NODE_INDEX=$PARALLEL_INDEX E2E_RETRIES=$E2E_RETRIES"
-  mkdir -p reports/shards
-  TESTFILES=$(printf '%s\n' "$BASE_FILES" | node scripts/plan-shards.js --shards "$PARALLEL_TOTAL" --index "$PARALLEL_INDEX" --timings "$TIMINGS_JSON" --verbose --manifest-out reports/shards/manifest-$PARALLEL_INDEX.json)
+# Try cache first (works for both SELF_SPLIT and CircleCI split modes)
+mkdir -p "$SHARD_CACHE_PREFIX" reports/shards
+if [ -f "$SHARD_CACHE_FILE" ]; then
+  echo "==> Using cached shard selection: key=$SHARD_CACHE_KEY index=$PARALLEL_INDEX"
+  TESTFILES=$(cat "$SHARD_CACHE_FILE")
 else
-  echo "==> Using CircleCI timings split"
-  mkdir -p reports/shards
-  TESTFILES=$(printf '%s\n' "$BASE_FILES" | circleci tests split --split-by=timings)
+  if [ "$SELF_SPLIT" = "1" ]; then
+    echo "==> Using self shard planner (shards=$PARALLEL_TOTAL index=$PARALLEL_INDEX)"
+    echo "ENV: CIRCLE_BRANCH=${CIRCLE_BRANCH:-local} CIRCLE_NODE_TOTAL=$PARALLEL_TOTAL CIRCLE_NODE_INDEX=$PARALLEL_INDEX E2E_RETRIES=$E2E_RETRIES"
+
+    # Optional: precompute and cache all shard files in one go when requested
+    if [ "${SHARD_PRECOMPUTE_ALL:-0}" = "1" ] && [ ! -f "$SHARD_MANIFEST_FILE" ]; then
+      echo "==> Precomputing all shard splits and caching (key=$SHARD_CACHE_KEY)"
+      for i in $(seq 0 $((PARALLEL_TOTAL-1))); do
+        OUT=$(printf '%s\n' "$BASE_FILES" | node scripts/plan-shards.js --shards "$PARALLEL_TOTAL" --index "$i" --timings "$TIMINGS_JSON" --manifest-out "$SHARD_MANIFEST_FILE")
+        printf '%s\n' "$OUT" > "${SHARD_CACHE_PREFIX}/files-$i.txt"
+      done
+      TESTFILES=$(cat "$SHARD_CACHE_FILE")
+    else
+      TESTFILES=$(printf '%s\n' "$BASE_FILES" | node scripts/plan-shards.js --shards "$PARALLEL_TOTAL" --index "$PARALLEL_INDEX" --timings "$TIMINGS_JSON" --verbose --manifest-out "$SHARD_MANIFEST_FILE")
+      # Cache the freshly computed list for this index
+      printf '%s\n' "$TESTFILES" > "$SHARD_CACHE_FILE"
+    fi
+  else
+    echo "==> Using CircleCI timings split"
+    TESTFILES=$(printf '%s\n' "$BASE_FILES" | circleci tests split --split-by=timings)
+    # Cache the selection so reruns reuse the same split
+    printf '%s\n' "$TESTFILES" > "$SHARD_CACHE_FILE"
+  fi
 fi
 
 printf '%s\n' "$TESTFILES" > reports/shards/files-$PARALLEL_INDEX.txt
