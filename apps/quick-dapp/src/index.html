@@ -6,6 +6,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>QuickDapp</title>
     <link rel="stylesheet" integrity="ha384-50oBUHEmvpQ+1lW4y57PTFmhCaXp0ML5d60M1M7uH2+nqUivzIebhndOJK28anvf" crossorigin="anonymous" href="https://remix.ethereum.org/assets/fontawesome/css/all.css">
+    <script src="https://unpkg.com/esbuild-wasm@0.25.12/lib/browser.min.js"></script>
+    <script type="module">
+      await window.esbuild.initialize({
+        wasmURL: "https://unpkg.com/esbuild-wasm@0.25.12/esbuild.wasm",
+        worker: true,
+      });
+
+      console.log("✅ esbuild initialized!");
+    </script>
   </head>
   <body>
     <script>

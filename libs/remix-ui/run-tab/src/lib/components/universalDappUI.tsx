@@ -311,7 +311,7 @@ export function UniversalDappUI(props: UdappProps) {
                       try {
                         const data = await props.plugin.call('compilerArtefacts', 'getArtefactsByContractName', props.instance.name)
                         const lastGenerated = await props.plugin.call('ai-dapp-generator', 'getLastGeneratedDapp', address)
-                        if (lastGenerated) {
+                        if (lastGenerated && Object.keys(lastGenerated).length > 0) {
                           // Update the instance with the generated content
                           props.editInstance(address, props.instance.abi, props.instance.name, data.artefact.devdoc, data.artefact.metadata, lastGenerated)
                           return

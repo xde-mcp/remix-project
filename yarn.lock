@@ -14830,10 +14830,10 @@ es6-weak-map@^2.0.1, es6-weak-map@^2.0.3:
     es6-iterator "^2.0.3"
     es6-symbol "^3.1.1"
 
-esbuild-wasm@^0.19.6:
-  version "0.19.6"
-  resolved "https://registry.yarnpkg.com/esbuild-wasm/-/esbuild-wasm-0.19.6.tgz#eda8a1ea2fe8d656caa3185bf25e38a8ab7af977"
-  integrity sha512-PmjQeQlCXjN5ILhu1tOLkDc7Mqyxw0M2x9lRMi4VwLoVKnfbANieH5pRwhszkBg64LkM/GUiZZNsME4mfTigwA==
+esbuild-wasm@^0.25.12:
+  version "0.25.12"
+  resolved "https://registry.yarnpkg.com/esbuild-wasm/-/esbuild-wasm-0.25.12.tgz#3dcb21a5d773ae6e7670caae906f1f0598398b08"
+  integrity sha512-rZqkjL3Y6FwLpSHzLnaEy8Ps6veCNo1kZa9EOfJvmWtBq5dJH4iVjfmOO6Mlkv9B0tt9WFPFmb/VxlgJOnueNg==
 
 esbuild@^0.25.0:
   version "0.25.0"

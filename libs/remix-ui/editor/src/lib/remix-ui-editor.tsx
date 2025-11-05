@@ -1190,6 +1190,91 @@ export const EditorUI = (props: EditorUIProps) => {
     // hide the module resolution error. We have to remove this when we know how to properly resolve imports.
     monacoRef.current.languages.typescript.typescriptDefaults.setDiagnosticsOptions({ diagnosticCodesToIgnore: [2792]})
 
+    // Configure TypeScript compiler options for JSX/TSX support
+    monacoRef.current.languages.typescript.typescriptDefaults.setCompilerOptions({
+      jsx: monacoRef.current.languages.typescript.JsxEmit.React,
+      jsxFactory: 'React.createElement',
+      reactNamespace: 'React',
+      allowNonTsExtensions: true,
+      allowJs: true,
+      target: monacoRef.current.languages.typescript.ScriptTarget.Latest,
+      moduleResolution: monacoRef.current.languages.typescript.ModuleResolutionKind.NodeJs,
+      module: monacoRef.current.languages.typescript.ModuleKind.ESNext,
+      noEmit: true,
+      esModuleInterop: true,
+      allowSyntheticDefaultImports: true,
+      skipLibCheck: true,
+      resolveJsonModule: true,
+      isolatedModules: true,
+    })
+
+    // Configure JavaScript compiler options for JSX support
+    monacoRef.current.languages.typescript.javascriptDefaults.setCompilerOptions({
+      jsx: monacoRef.current.languages.typescript.JsxEmit.React,
+      jsxFactory: 'React.createElement',
+      reactNamespace: 'React',
+      allowNonTsExtensions: true,
+      target: monacoRef.current.languages.typescript.ScriptTarget.Latest,
+      moduleResolution: monacoRef.current.languages.typescript.ModuleResolutionKind.NodeJs,
+      module: monacoRef.current.languages.typescript.ModuleKind.ESNext,
+      noEmit: true,
+      esModuleInterop: true,
+      allowSyntheticDefaultImports: true,
+      skipLibCheck: true,
+      resolveJsonModule: true,
+      isolatedModules: true,
+      checkJs: false,
+    })
+
+    // Enable JSX diagnostics for JavaScript
+    monacoRef.current.languages.typescript.javascriptDefaults.setDiagnosticsOptions({
+      noSemanticValidation: false,
+      noSyntaxValidation: false,
+    })
+
+    // Enable HTML and CSS validation
+    monacoRef.current.languages.html.htmlDefaults.setOptions({
+      format: {
+        tabSize: 2,
+        insertSpaces: true,
+        wrapLineLength: 120,
+        unformatted: 'wbr',
+        contentUnformatted: 'pre,code,textarea',
+        indentInnerHtml: false,
+        preserveNewLines: true,
+        maxPreserveNewLines: null,
+        indentHandlebars: false,
+        endWithNewline: false,
+        extraLiners: 'head, body, /html',
+        wrapAttributes: 'auto'
+      },
+      suggest: { html5: true }
+    })
+
+    monacoRef.current.languages.css.cssDefaults.setOptions({
+      validate: true,
+      lint: {
+        compatibleVendorPrefixes: 'ignore',
+        vendorPrefix: 'warning',
+        duplicateProperties: 'warning',
+        emptyRules: 'warning',
+        importStatement: 'ignore',
+        boxModel: 'ignore',
+        universalSelector: 'ignore',
+        zeroUnits: 'ignore',
+        fontFaceProperties: 'warning',
+        hexColorLength: 'error',
+        argumentsInColorFunction: 'error',
+        unknownProperties: 'warning',
+        ieHack: 'ignore',
+        unknownVendorSpecificProperties: 'ignore',
+        propertyIgnoredDueToDisplay: 'warning',
+        important: 'ignore',
+        float: 'ignore',
+        idSelector: 'ignore'
+      }
+    })
+
     // Register a tokens provider for the language
     monacoRef.current.languages.setMonarchTokensProvider('remix-solidity', solidityTokensProvider as any)
     monacoRef.current.languages.setLanguageConfiguration('remix-solidity', solidityLanguageConfig as any)
