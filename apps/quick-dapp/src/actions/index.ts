@@ -2,21 +2,10 @@ import axios from 'axios';
 import { omitBy } from 'lodash';
 import semver from 'semver';
 import { execution } from '@remix-project/remix-lib';
-import SurgeClient from '@drafish/surge-client';
 import remixClient from '../remix-client';
 import { themeMap } from '../components/DeployPanel/theme';
-import { endpointUrls } from "@remix-endpoints-helper"
 
 const { encodeFunctionId } = execution.txHelper;
-
-const surgeClient = new SurgeClient({
-  // surge backend doesn't support cross-domain, that's why the proxy goes
-  // here is the codebase of proxy: https://github.com/remix-project-org/remix-wildcard/blob/master/src/hosts/common-corsproxy.ts
-  proxy: endpointUrls.commonCorsProxy,
-  onError: (err: Error) => {
-    console.log(err);
-  },
-});
 
 const getVersion = (solcVersion) => {
   let version = '0.8.25'
@@ -130,156 +119,6 @@ export const getInfoFromNatSpec = async (value: boolean) => {
     },
   });
 };
-
-export const deploy = async (payload: any, callback: any) => {
-  const surgeToken = localStorage.getItem('__SURGE_TOKEN');
-  const surgeEmail = localStorage.getItem('__SURGE_EMAIL');
-  let isLogin = false;
-  if (surgeToken && surgeEmail === payload.email) {
-    try {
-      await surgeClient.whoami();
-      isLogin = true;
-    } catch (error) {
-      /* empty */
-    }
-  }
-  if (!isLogin) {
-    try {
-      await surgeClient.login({
-        user: payload.email,
-        password: payload.password,
-      });
-      localStorage.setItem('__SURGE_EMAIL', payload.email);
-      localStorage.setItem('__SURGE_PASSWORD', payload.password);
-      localStorage.setItem('__DISQUS_SHORTNAME', payload.shortname);
-    } catch (error: any) {
-      callback({ code: 'ERROR', error: error.message });
-      return;
-    }
-  }
-
-  const { logo, htmlTemplate, ...instance } = state.instance;
-
-  const instanceJson = JSON.stringify({
-    ...instance,
-    shortname: payload.shortname,
-    shareTo: payload.shareTo,
-    showLogo: !!logo,
-  })
-
-  const files: Record<string, string> = {
-    'dir/assets/instance.json': instanceJson,
-  };
-
-  // Use the HTML template provided by the user instead of downloading dapp-template
-  if (htmlTemplate) {
-    files['dir/index.html'] = htmlTemplate;
-  } else {
-    // Fallback to the old method if no HTML template is provided
-    const { data } = await axios.get(
-      `${window.origin}/plugins/remix-dapp/manifest.json`
-    );
-
-    const paths = Object.keys(data);
-
-    for (let index = 0; index < paths.length; index++) {
-      const path = paths[index];
-      const resp = await axios.get(`${window.origin}/plugins/remix-dapp/${path}`);
-      files[`dir/${path}`] = resp.data;
-    }
-
-    if (files['dir/index.html']) {
-      files['dir/index.html'] = files['dir/index.html'].replace(
-        'assets/css/themes/remix-dark_tvx1s2.css',
-        themeMap[instance.theme].url
-      );
-    }
-  }
-
-  if (logo) {
-    files['dir/assets/logo.png'] = logo
-  }
-  files['dir/CORS'] = '*'
-
-  try {
-    await surgeClient.publish({
-      files,
-      domain: `${payload.subdomain}.surge.sh`,
-      onProgress: ({
-        id,
-        progress,
-        file,
-      }: {
-        id: string;
-        progress: number;
-        file: string;
-      }) => {
-        // console.log({ id, progress, file });
-      },
-      onTick: (tick: string) => {},
-    });
-  } catch ({ message }: any) {
-    if (message === '403') {
-      callback({ code: 'ERROR', error: 'this domain belongs to someone else' });
-    } else {
-      callback({ code: 'ERROR', error: 'gateway timeout, please try again' });
-    }
-    return;
-  }
-
-  try {
-    // some times deployment might fail even if it says successfully, that's why we need to do the double check.
-    const instanceResp = await axios.get(`https://${payload.subdomain}.surge.sh/assets/instance.json`);
-    if (instanceResp.status === 200 && JSON.stringify(instanceResp.data) === instanceJson) {
-      callback({ code: 'SUCCESS', error: '' });
-      return;
-    }
-  } catch (error) {}
-  callback({ code: 'ERROR', error: 'deploy failed, please try again' });
-  return;
-
-};
-
-export const teardown = async (payload: any, callback: any) => {
-  const surgeToken = localStorage.getItem('__SURGE_TOKEN');
-  const surgeEmail = localStorage.getItem('__SURGE_EMAIL');
-  let isLogin = false;
-  if (surgeToken && surgeEmail === payload.email) {
-    try {
-      await surgeClient.whoami();
-      isLogin = true;
-    } catch (error) {
-      /* empty */
-    }
-  }
-  if (!isLogin) {
-    try {
-      await surgeClient.login({
-        user: payload.email,
-        password: payload.password,
-      });
-      localStorage.setItem('__SURGE_EMAIL', payload.email);
-      localStorage.setItem('__SURGE_PASSWORD', payload.password);
-      localStorage.setItem('__DISQUS_SHORTNAME', payload.shortname);
-    } catch (error: any) {
-      callback({ code: 'ERROR', error: error.message });
-      return;
-    }
-  }
-
-  try {
-    await surgeClient.teardown(`${payload.subdomain}.surge.sh`);
-  } catch ({ message }: any) {
-    if (message === '403') {
-      callback({ code: 'ERROR', error: 'this domain belongs to someone else' });
-    } else {
-      callback({ code: 'ERROR', error: 'gateway timeout, please try again' });
-    }
-    return;
-  }
-  callback({ code: 'SUCCESS', error: '' });
-  return;
-}
 
 export const initInstance = async ({
   methodIdentifiers,
