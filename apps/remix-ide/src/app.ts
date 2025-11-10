@@ -72,6 +72,7 @@ import { GitHubAuthHandler } from './app/plugins/electron/gitHubAuthHandler'
 import { GitPlugin } from './app/plugins/git'
 import { Matomo } from './app/plugins/matomo'
 import { DesktopClient } from './app/plugins/desktop-client'
+import { SaveIpfsPlugin } from './app/plugins/saveIpfs'
 import { DesktopHost } from './app/plugins/electron/desktopHostPlugin'
 import { WalletConnect } from './app/plugins/walletconnect'
 
@@ -306,6 +307,9 @@ class AppComponent {
     //---- git
     const git = new GitPlugin()
 
+    //---- saveIpfs
+    const saveIpfs = new SaveIpfsPlugin()
+
     //---- matomo
     const matomo = new Matomo()
 
@@ -450,6 +454,7 @@ class AppComponent {
       solidityScript,
       templates,
       git,
+      saveIpfs,
       pluginStateLogger,
       matomo,
       templateSelection,

@@ -49,6 +49,7 @@ interface WorkspacesDropdownProps {
   downloadCurrentWorkspace: () => void
   deleteCurrentWorkspace: (workspaceName?: string) => void
   downloadWorkspaces: () => void
+  saveIpfs: () => void
   restoreBackup: () => void
   deleteAllWorkspaces: () => void
   setCurrentMenuItemName: (workspaceName: string) => void
@@ -77,7 +78,7 @@ const ITEM_LABELS = [
   "Fifth item",
 ]
 
-export const WorkspacesDropdown: React.FC<WorkspacesDropdownProps> = ({ menuItems, NO_WORKSPACE, switchWorkspace, CustomToggle, createWorkspace, downloadCurrentWorkspace, restoreBackup, deleteAllWorkspaces, setCurrentMenuItemName, setMenuItems, renameCurrentWorkspace, deleteCurrentWorkspace, downloadWorkspaces, connectToLocalhost }) => {
+export const WorkspacesDropdown: React.FC<WorkspacesDropdownProps> = ({ menuItems, NO_WORKSPACE, switchWorkspace, CustomToggle, createWorkspace, downloadCurrentWorkspace, restoreBackup, deleteAllWorkspaces, setCurrentMenuItemName, setMenuItems, renameCurrentWorkspace, deleteCurrentWorkspace, downloadWorkspaces, saveIpfs, connectToLocalhost }) => {
   const [showMain, setShowMain] = useState(false)
   const [openSub, setOpenSub] = useState<number | null>(null)
   const global = useContext(TopbarContext)
@@ -437,6 +438,23 @@ export const WorkspacesDropdown: React.FC<WorkspacesDropdownProps> = ({ menuItem
                 Backup
             </span>
           </Dropdown.Item>
+
+          <Dropdown.Item onClick={() => {
+            saveIpfs()
+            setShowMain(false)
+            setOpenSub(null)
+          }}>
+            <span className="pl-2" onClick={() => {
+              saveIpfs()
+              setShowMain(false)
+              setOpenSub(null)
+            }}>
+              <i className="far fa-download me-2"></i>
+                Save to IPFS
+            </span>
+          </Dropdown.Item>
+
+
           <Dropdown.Item onClick={() => {
             restoreBackup()
             setShowMain(false)

@@ -244,6 +244,15 @@ export function RemixUiTopbar() {
       console.error(e)
     }
   }
+
+  const saveIpfs = async () => {
+    try {
+      await plugin.call('saveIpfs', 'save')
+    } catch (e) {
+      console.error(e)
+    }
+  }
+
   const onFinishDeleteAllWorkspaces = async () => {
     try {
       await deleteAllWorkspacesAction()
@@ -524,6 +533,7 @@ export function RemixUiTopbar() {
             downloadCurrentWorkspace={downloadCurrentWorkspace}
             deleteCurrentWorkspace={deleteCurrentWorkspace}
             downloadWorkspaces={downloadWorkspaces}
+            saveIpfs={saveIpfs}
             restoreBackup={restoreBackup}
             deleteAllWorkspaces={deleteAllWorkspaces}
             setCurrentMenuItemName={setCurrentMenuItemName}

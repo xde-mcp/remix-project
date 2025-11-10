@@ -15,6 +15,7 @@ export interface HamburgerMenuProps {
   pushChangesToGist: () => void
   cloneGitRepository: () => void
   downloadWorkspaces: () => void
+  saveIpfs: () => void
   restoreBackup: () => void
   hideIconsMenu: (showMenu: boolean) => void
   handleRemixdWorkspace: () => void

@@ -108,6 +108,13 @@ export interface ScriptExecutorEvent extends MatomoEventBase {
     | 'CompileAndRun';
 }
 
+export interface SaveIpfsEvent extends MatomoEventBase {
+  category: 'SaveIpfs';
+  action: 
+    | 'error'
+    | 'upload';
+}
+
 
 
 /**

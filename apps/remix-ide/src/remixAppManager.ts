@@ -82,6 +82,7 @@ let requiredModules = [
   'remixAID',
   'solhint',
   'dgit',
+  'saveIpfs',
   'pinnedPanel',
   'pluginStateLogger',
   'environmentExplorer',
