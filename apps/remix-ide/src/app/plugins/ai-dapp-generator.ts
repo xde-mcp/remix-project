@@ -36,22 +36,6 @@ export class AIDappGenerator extends Plugin {
     super(profile)
   }
 
-  private async dumpFileToRemix(pages: Pages) {
-    try {
-      await this.call('fileManager', 'remove', 'dapp')      
-    } catch (error) {
-      console.error('Error dumping files to Remix:', error);
-    }
-    try {
-      for (const [filename, content] of Object.entries(pages)) {
-        await this.call('fileManager', 'writeFile', 'dapp/' + filename, content)
-      }
-    } catch (error) {
-      console.error('Error dumping files to Remix:', error);
-    }
-    
-  }
-
   /**
    * Generate a new DApp or update an existing one
    */
@@ -62,28 +46,25 @@ export class AIDappGenerator extends Plugin {
 
       const context = this.getOrCreateContext(options.address)
 
-      // Check if this is an update or initial generation
-      const isUpdate = context.messages.length > 0
+      const message = this.createInitialMessage(options)
+      const messagesToSend = [
+        { role: 'user', content: message }
+      ]
 
-      const message = isUpdate
-        ? this.createUpdateMessage(options.description)
-        : this.createInitialMessage(options)
-
-      context.messages.push({ role: 'user', content: message })
-
-      const htmlContent = await this.callLLMAPI(context.messages)
+      const htmlContent = await this.callLLMAPI(messagesToSend) 
 
       const pages = parsePages(htmlContent)
-      // Update context with LLM response
-      context.messages.push({ role: 'assistant', content: htmlContent })
+      
+      context.messages = [
+        { role: 'user', content: message },
+        { role: 'assistant', content: htmlContent }
+      ]
       this.saveContext(options.address, context)
-
-      this.dumpFileToRemix(pages)
 
       this.emit('dappGenerated', {
         address: options.address,
-        content: pages,
-        isUpdate
+        content: null,
+        isUpdate: false
       })
 
       await this.call('notification', 'toast', 'The DApp has been generated successfully!')
@@ -117,8 +98,6 @@ export class AIDappGenerator extends Plugin {
 
       context.messages.push({ role: 'assistant', content: htmlContent })
       this.saveContext(address, context)
-
-      this.dumpFileToRemix(pages)
 
       this.emit('dappUpdated', { address, content: pages })
       return pages
@@ -184,7 +163,6 @@ export class AIDappGenerator extends Plugin {
         }
       }
     }
-    this.dumpFileToRemix(currentPages)
     return currentPages
   }
 
@@ -253,7 +231,6 @@ export class AIDappGenerator extends Plugin {
       throw new Error('Invalid response from LLM API')
     }
     console.log('LLM Response:', json)
-    this.call('fileManager', 'writeFile', 'main.js', json.choices[0].message.content)
     return json.choices[0].message.content
   }
 }
@@ -307,48 +284,46 @@ const data =
   const extractHtmlContent = (chunk: string): string => {
     if (!chunk) return "";
 
-    // Extract HTML content
-    const htmlMatch = chunk.trim().match(/<!DOCTYPE html>[\s\S]*/);
-    if (!htmlMatch) return "";
+    const codeMatch = chunk.trim().match(/```(?:\w*\n)?([\s\S]*?)```/);
+    
+    let content: string;
 
-    let htmlContent = htmlMatch[0];
-
-    // Ensure proper HTML structure
-    htmlContent = ensureCompleteHtml(htmlContent);
-
-    // Remove markdown code blocks if present
-    htmlContent = htmlContent.replace(/```/g, "");
-
-    return htmlContent;
+    if (codeMatch && codeMatch[1]) {
+      content = codeMatch[1];
+    } else {
+      content = chunk.trim();
+    }
+    
+    return content.replace(/```/g, "").trim();
   };
 
-const parsePages = (content: string) => {
+  const parsePages = (content: string) => {
     const pages = {}
-    if (!content.match(/<<<<<<< START_TITLE (.*?) >>>>>>> END_TITLE/)) {
+    const markerRegex = /<<<<<<< START_TITLE (.*?) >>>>>>> END_TITLE/g;
+
+    if (!content.match(markerRegex)) {
+      console.warn('[AI-DAPP-LOG] parsePages: AI 응답에서 START_TITLE 마커를 찾을 수 없습니다.');
       return pages;
     }
 
-    const cleanedContent = content.replace(
-      /[\s\S]*?<<<<<<< START_TITLE (.*?) >>>>>>> END_TITLE/,
-      "<<<<<<< START_TITLE $1 >>>>>>> END_TITLE"
-    );
-    const htmlChunks = cleanedContent.split(
-      /<<<<<<< START_TITLE (.*?) >>>>>>> END_TITLE/
-    );
-    const processedChunks = new Set<number>();
+    const parts = content.split(markerRegex);
+    
+    for (let i = 1; i < parts.length; i += 2) {
+      const filename = parts[i].trim();
+      const rawFileContent = parts[i + 1];
 
-    htmlChunks.forEach((chunk, index) => {
-      if (processedChunks.has(index) || !chunk?.trim()) {
-        return;
+      if (filename && rawFileContent) {
+        const fileContent = extractHtmlContent(rawFileContent);
+        
+        if (fileContent) {
+          console.log(`[AI-DAPP-LOG] parsePages: 파일명 "${filename}" 파싱 성공.`);
+          pages[filename] = fileContent;
+        } else {
+          console.warn(`[AI-DAPP-LOG] parsePages: 파일명 "${filename}"의 내용은 찾았으나, 내용이 비어있습니다.`);
+        }
       }
-      const htmlContent = extractHtmlContent(htmlChunks[index + 1]);
-
-      if (htmlContent) {
-        pages[chunk.trim()] = htmlContent
-        processedChunks.add(index);
-        processedChunks.add(index + 1);
-      }
-    })
+    }
+    
     return pages;
   };
 

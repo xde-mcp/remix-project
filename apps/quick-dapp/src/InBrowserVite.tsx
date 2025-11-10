@@ -7,6 +7,9 @@ export interface BuildResult {
   error?: string;
 }
 
+let globalInitPromise: Promise<void> | null = null;
+let globalEsbuild: any = null;
+
 export class InBrowserVite {
   private esbuild: any = null;
   private initialized = false;
@@ -17,25 +20,38 @@ export class InBrowserVite {
    * Subsequent calls return the same initialization promise.
    */
   async initialize(): Promise<void> {
-    if (this.initialized) return;
-    if (this.initPromise) return this.initPromise;
+    if (globalInitPromise) {
+      await globalInitPromise;
+      this.esbuild = globalEsbuild;
+      this.initialized = true;
+      return;
+    }
 
-    this.initPromise = (async () => {
+    globalInitPromise = (async () => {
       try {
-        // dynamic import for ESM browser build
         // @ts-ignore 
         if (!window.esbuild) {
-          throw new Error('esbuild not found on window. Make sure to include esbuild-wasm script.');        }
+          throw new Error('esbuild not found on window. Make sure to include esbuild-wasm script.');
+        }
+        const esbuild = (window as any).esbuild;
         
-        this.esbuild = (window as any).esbuild;
-        this.initialized = true;
+        await esbuild.initialize({
+          wasmURL: "https://unpkg.com/esbuild-wasm@0.25.12/esbuild.wasm",
+          worker: true,
+        });
+        
+        console.log('[InBrowserVite-LOG] ✅ esbuild initialized ');
+        globalEsbuild = esbuild;
+
       } catch (err) {
-        this.initPromise = null;
+        globalInitPromise = null;
         throw new Error(`esbuild initialization failed: ${err.message}`);
       }
     })();
 
-    return this.initPromise;
+    await globalInitPromise;
+    this.esbuild = globalEsbuild;
+    this.initialized = true;
   }
 
   /**
@@ -88,7 +104,11 @@ export class InBrowserVite {
         plugins: [plugin],
         define: { 'process.env.NODE_ENV': '"production"' },
         loader: {
-          '.js': 'jsx',    // Allow JSX in .js files
+          '.js': 'jsx',
+          '.jsx': 'jsx',
+          '.ts': 'tsx',
+          '.tsx': 'tsx',
+          '.json': 'json',
         },
       });
 
@@ -189,14 +209,49 @@ export class InBrowserVite {
             }
           }
 
-          // Not a local file, treat as external CDN import
-          console.log(`[InBrowserVite] Resolved '${args.path}' to CDN: https://esm.sh/${args.path}`);
-          return { path: `https://esm.sh/${args.path}`, namespace: 'external' };
+          const cdnPath = `https://esm.sh/${args.path}`;
+          console.log(`[InBrowserVite] Resolved '${args.path}' to external CDN: ${cdnPath}`);
+          
+          return { path: cdnPath, external: true };
+        });
+
+        build.onLoad({ filter: /\.css$/, namespace: 'local' }, async (args: any) => {
+          console.log(`[InBrowserVite-LOG] CSS 파일 "${args.path}"를 'css-in-js'로 변환합니다.`);
+          
+          const pathsToTry = [
+            args.path,
+            args.path.startsWith('/') ? args.path.substring(1) : `/${args.path}`,
+          ];
+
+          for (const testPath of pathsToTry) {
+            if (map.has(testPath)) {
+              const cssContent = map.get(testPath);
+              const escapedCss = JSON.stringify(cssContent);
+              
+              const jsContent = `
+                try {
+                  const css = ${escapedCss};
+                  if (typeof css === 'string' && css.trim().length > 0) {
+                    const style = document.createElement('style');
+                    style.type = 'text/css';
+                    style.appendChild(document.createTextNode(css));
+                    document.head.appendChild(style);
+                  }
+                } catch (e) {
+                  console.error('Failed to inject CSS for ${args.path}', e);
+                }
+              `;
+              
+              return { contents: jsContent, loader: 'js' }; 
+            }
+          }
+          return { contents: `throw new Error('File not found: ${args.path}')`, loader: 'js' };
         });
 
         // load local files
         build.onLoad({ filter: /.*/, namespace: 'local' }, async (args: any) => {
-          // Try both with and without leading slash
+          if (args.path.endsWith('.css')) return;
+
           const pathsToTry = [
             args.path,
             args.path.startsWith('/') ? args.path.substring(1) : `/${args.path}`,
@@ -213,18 +268,6 @@ export class InBrowserVite {
           return { contents: `throw new Error('File not found in virtual filesystem: ${args.path}')`, loader: 'js' };
         });
 
-        // load http(s) files (simple fetch)
-        build.onLoad({ filter: /^https?:\/\//, namespace: 'external' }, async (args: any) => {
-          try {
-            const res = await fetch(args.path);
-            const contents = await res.text();
-            // try to infer loader from extension
-            const loader = this.guessLoader(args.path);
-            return { contents, loader };
-          } catch (err) {
-            return { contents: `throw new Error('Failed to fetch ${args.path}: ${err.message}')` , loader: 'js' };
-          }
-        });
       }
     };
   }
@@ -260,7 +303,7 @@ export class InBrowserVite {
     if (path.endsWith('.ts')) return 'ts';
     if (path.endsWith('.tsx')) return 'tsx';
     if (path.endsWith('.jsx')) return 'jsx';
-    if (path.endsWith('.css')) return 'css';
+    if (path.endsWith('.css')) return 'js';
     if (path.endsWith('.json')) return 'json';
     if (path.endsWith('.html')) return 'text'; // HTML files as text, not code
     // Default to 'jsx' for .js, .mjs and other files to support JSX syntax

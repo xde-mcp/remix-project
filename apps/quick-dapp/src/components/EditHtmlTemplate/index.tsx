@@ -16,50 +16,155 @@ export interface ParsedPagesResult {
   pages: Pages
 }
 
+const readDappFiles = async (path: string, map: Map<string, string>) => {
+  try {
+    const files = await remixClient.call('fileManager', 'readdir', path);
+    
+    for (const [filePath, fileData] of Object.entries(files)) {
+      // @ts-ignore
+      if (fileData.isDirectory) {
+        await readDappFiles(filePath, map);
+      } else {
+        const content = await remixClient.call('fileManager', 'readFile', filePath);
+        const relativePath = '/' + filePath.replace(/^(dapp\/)/, '');
+        map.set(relativePath, content);
+      }
+    }
+  } catch (e) {
+    console.error(`[QuickDapp-LOG] '${path}'`, e);
+  }
+}
+
 function EditHtmlTemplate(): JSX.Element {
   const intl = useIntl();
   const { appState, dispatch } = useContext(AppContext);
-  const { htmlTemplate, title, details } = appState.instance;
-  const [localHtmlTemplate, setLocalHtmlTemplate] = useState<ParsedPagesResult>(htmlTemplate);
+  const { title, details } = appState.instance; 
   const [iframeError, setIframeError] = useState<string>('');
   const [showIframe, setShowIframe] = useState(true);
+  const [isBuilderReady, setIsBuilderReady] = useState(false);
+  const [isBuilding, setIsBuilding] = useState(false);
+
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const builderRef = useRef<InBrowserVite | null>(null);
 
-  const handleUpdateTemplate = (files: ParsedPagesResult) => {
-    setLocalHtmlTemplate(files);
-    dispatch({
-      type: 'SET_INSTANCE',
-      payload: {
-        htmlTemplate: files,
-      },
-    });
-  };
+  const runBuild = async () => {
+    if (!iframeRef.current) {
+      return;
+    }
+    if (!isBuilderReady) {
+      setIframeError('Builder is not initialized. Please wait...');
+      return;
+    }
+
+    setIsBuilding(true);
+    setIframeError('');
+    setShowIframe(true);
+
+    const builder = builderRef.current;
+    if (!builder || !builder.isReady()) {
+      const errorMsg = 'Builder not ready. Please wait for initialization to complete.';
+      setIframeError(errorMsg);
+      setIsBuilding(false);
+      return;
+    }
+
+    const mapFiles = new Map<string, string>();
+    let hasBuildableFiles = false;
+    let indexHtmlContent = '';
+
+    try {
+      await readDappFiles('dapp', mapFiles);
+
+      if (mapFiles.size === 0) {
+        setIsBuilding(false);
+        return;
+      }
+
+      for (const [path] of mapFiles.entries()) {
+        if (path.endsWith('.js') || path.endsWith('.jsx') || path.endsWith('.ts') || path.endsWith('.tsx')) {
+          hasBuildableFiles = true;
+        }
+        if (path === '/index.html') {
+          indexHtmlContent = mapFiles.get(path);
+        }
+      }
+
+    } catch (e) {
+      setIsBuilding(false);
+      return;
+    }
+
+    const doc = iframeRef.current.contentDocument || iframeRef.current.contentWindow?.document;
+    if (!doc) {
+      setIsBuilding(false);
+      return;
+    }
+
+    const ext = `<script>window.ethereum = parent.window.ethereum</script>`;
+
+    try {
+      if (hasBuildableFiles) {
+        const result = await builder.build(mapFiles, '/src/main.jsx');
+
+        console.log({result})
+
+        if (!result.success) {
+          doc.open();
+          doc.write(`<pre style="color: red; white-space: pre-wrap;">${result.error || 'Unknown build error'}</pre>`);
+          doc.close();
+          setIsBuilding(false);
+          return;
+        }
+
+        let finalHtml = indexHtmlContent;
+        if (!finalHtml) {
+          setIsBuilding(false);
+          return;
+        }
+        
+        finalHtml = finalHtml.replace('</head>', `${ext}\n</head>`);
+        
+        const scriptTag = `\n<script type="module">${result.js}</script>\n`;
+        
+        finalHtml = finalHtml.replace(
+          /<script type="module"[^>]*src="(?:\/|\.\/)?src\/main\.jsx"[^>]*><\/script>/, 
+          scriptTag
+        );
+        
+        finalHtml = finalHtml.replace(
+          /<link rel="stylesheet"[^>]*href="(?:\/|\.\/)?src\/index\.css"[^>]*>/, 
+          ''
+        );
+        
+        doc.open();
+        doc.write(finalHtml);
+        doc.close();
+
+      } else {
+        doc.open();
+        doc.write(indexHtmlContent.replace('</head>', `${ext}\n</head>`));
+        doc.close();
+      }
+    } catch (e) {
+      setIframeError(`Preview Error: ${e instanceof Error ? e.message : 'Unknown error'}`);
+      setShowIframe(false);
+    }
+
+    setIsBuilding(false);
+  }
 
   const handleChatMessage = async (message: string) => {
     try {
-      // Use the AI DApp Generator plugin to update the DApp
-      const htmlContent: ParsedPagesResult = await remixClient.call('ai-dapp-generator' as any, 'updateDapp', appState.instance.address, message)
-      console.log('Received updated HTML content from AI DApp Generator:', htmlContent);
-      // Parse the formatted HTML content
-      const pages = htmlContent;
+      await remixClient.call('ai-dapp-generator' as any, 'updateDapp', appState.instance.address, message)
 
-      // Get the first page (should be index.html)
-      // const indexHtml = pages.get('index.html') || pages.values().next().value || htmlContent;
+      runBuild(); 
 
-      handleUpdateTemplate(pages);
     } catch (error) {
       console.error('Error updating DApp via chat:', error)
-      // Fallback to showing an error message to the user
-      // You could add a toast notification here if available
+      setIframeError('Failed to update DApp via AI: ' + error.message);
     }
   };
 
-  const handleUpdateFromChat = (code: ParsedPagesResult) => {
-    handleUpdateTemplate(code);
-  };
-
-  // Initialize InBrowserVite once on mount
   useEffect(() => {
     let mounted = true;
 
@@ -70,6 +175,10 @@ function EditHtmlTemplate(): JSX.Element {
         const builder = new InBrowserVite();
         await builder.initialize();
         builderRef.current = builder;
+
+        if (mounted) {
+          setIsBuilderReady(true);
+        }
       } catch (err) {
         console.error('Failed to initialize InBrowserVite:', err);
         if (mounted) {
@@ -85,173 +194,11 @@ function EditHtmlTemplate(): JSX.Element {
     };
   }, []);
 
-  // Update iframe content when template changes
   useEffect(() => {
-    
-    if (iframeRef.current && localHtmlTemplate) {
-      
-      setIframeError('');
-      setShowIframe(true);
-
-      const iframe = iframeRef.current;
-
-      const handleIframeLoad = () => {
-        // Clear any previous errors when iframe loads successfully
-        setIframeError('');
-      };
-
-      const handleIframeError = () => {
-        setIframeError('Failed to load the preview. There may be an error in your HTML template.');
-        setShowIframe(false);
-      };
-
-      // Add event listeners
-      iframe.addEventListener('load', handleIframeLoad);
-      iframe.addEventListener('error', handleIframeError);    
-      
-
-      const run = async () => {
-        const doc = iframe.contentDocument || iframe.contentWindow?.document;
-        if (doc) {
-          const ext = `<script>window.ethereum = parent.window.ethereum</script>`
-
-          // Check if we have any buildable JS/JSX files
-          let hasBuildableFiles = false;
-          for (const [key, value] of Object.entries(localHtmlTemplate)) {
-            if (key.endsWith('.js') || key.endsWith('.jsx') || key.endsWith('.ts') || key.endsWith('.tsx')) {
-              hasBuildableFiles = true;
-              break
-            }
-          }
-          const mapFiles = new Map<string, string>(Object.entries(localHtmlTemplate))
-          if (hasBuildableFiles) {
-            // Use esbuild for JSX/React files
-            await new Promise((resolve, reject) => {
-              const checkInterval = setInterval(() => {
-                if (builderRef.current && builderRef.current.isReady()) {
-                  clearInterval(checkInterval);
-                  resolve(true);
-                }
-              }, 50);
-              // timeout after 10 seconds
-              setTimeout(() => {
-                clearInterval(checkInterval);
-                reject(new Error('esbuild initialization timed out'));
-              }, 10000);
-            })
-            const builder = builderRef.current;
-            if (!builder || !builder.isReady()) {
-              setIframeError('Builder not ready. Please wait for initialization to complete.');
-              setShowIframe(false);
-              return;
-            }
-
-            console.log('Building with files:', localHtmlTemplate);
-
-            // Let InBrowserVite auto-detect the entry point (will find first .js/.jsx file)
-            const result = await builder.build(mapFiles);
-
-            if (!result.success) {
-              // Show build error
-              doc.open();
-              doc.write(`<pre style="color: red; white-space: pre-wrap;">${result.error || 'Unknown build error'}</pre>`);
-              doc.close();
-              return;
-            }
-
-            // Get the HTML template (try index.html first, then any .html file)
-            let htmlTemplate = mapFiles.get('/index.html') || mapFiles.get('index.html');
-            if (!htmlTemplate) {
-              // Find any HTML file
-              for (const [key, value] of mapFiles.entries()) {
-                if (key.endsWith('.html')) {
-                  htmlTemplate = value;
-                  break;
-                }
-              }
-            }
-
-            if (htmlTemplate) {
-              // Inject the built JavaScript into the HTML template
-              // Look for closing body tag, or closing html tag, or just append
-              let finalHtml = htmlTemplate;
-
-              // Inject window.ethereum script in head
-              finalHtml = finalHtml.replace('</head>', `${ext}\n</head>`);
-
-              // Inject the built JavaScript as a module script before closing body
-              const scriptTag = `\n<script type="module">${result.js}</script>\n`;
-              if (finalHtml.includes('</body>')) {
-                finalHtml = finalHtml.replace('</body>', `${scriptTag}</body>`);
-              } else if (finalHtml.includes('</html>')) {
-                finalHtml = finalHtml.replace('</html>', `${scriptTag}</html>`);
-              } else {
-                finalHtml += scriptTag;
-              }
-
-              doc.open();
-              doc.write(finalHtml);
-              doc.close();
-            } else {
-              // No HTML template found, create a minimal one
-              const minimalHtml = `<!DOCTYPE html>
-              <html>
-              <head>
-                <meta charset="UTF-8">
-                <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>DApp</title>
-                ${ext}
-              </head>
-              <body>
-                <div id="root"></div>
-                <script type="module">${result.js}</script>
-              </body>
-              </html>`;
-              doc.open();
-              doc.write(minimalHtml);
-              doc.close();
-            }
-          } else {
-            // Plain HTML - render directly
-            const indexHtml = mapFiles.get('/index.html') || mapFiles.values().next().value || '';
-            // Inject window.ethereum script
-            const htmlWithEthereum = indexHtml.replace('</head>', `${ext}\n</head>`);
-            doc.open();
-            doc.write(htmlWithEthereum);
-            doc.close();
-          }
-
-          // Check for script errors in the iframe
-          const iframeWindow = iframe.contentWindow;
-          if (iframeWindow) {
-            iframeWindow.addEventListener('error', (event) => {
-              setIframeError(`Preview Error: ${event.error?.message || 'Script error in preview'}`);
-            });
-          }         
-          
-          
-        } else {
-          setIframeError('Cannot access iframe content. The preview may be blocked by security settings.');
-          setShowIframe(false);
-        }
-      }
-      try {
-        run()
-      } catch (error) {
-        setIframeError(`Preview Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        setShowIframe(false);
-      }
-
-      // Cleanup function
-      return () => {
-        iframe.removeEventListener('load', handleIframeLoad);
-        iframe.removeEventListener('error', handleIframeError);
-      };
-    } else if (!localHtmlTemplate) {
-      setIframeError('No HTML template provided. Please add content to see the preview.');
-      setShowIframe(false);
+    if (isBuilderReady) {
+      runBuild();
     }
-  }, [localHtmlTemplate]);
+  }, [isBuilderReady]);
 
   return (
     <Row className="m-0 h-100">
@@ -301,9 +248,24 @@ function EditHtmlTemplate(): JSX.Element {
         {/* Preview Section */}
         <Row className="flex-grow-1 mb-3">
           <Col xs={12} className="d-flex flex-column h-100">
-            <h5 className="mb-2 flex-shrink-0">
-              <FormattedMessage id="quickDapp.preview" defaultMessage="Preview" />
-            </h5>
+            <div className="d-flex justify-content-between align-items-center mb-2 flex-shrink-0">
+              <h5 className="mb-0">
+                <FormattedMessage id="quickDapp.preview" defaultMessage="Preview" />
+              </h5>
+              <Button 
+                variant="outline-primary" 
+                size="sm" 
+                onClick={runBuild} 
+                disabled={isBuilding}
+                data-id="quick-dapp-refresh-preview"
+              >
+                {isBuilding ? (
+                  <><i className="fas fa-spinner fa-spin me-1"></i> Building...</>
+                ) : (
+                  <><i className="fas fa-sync-alt me-1"></i> Refresh Preview</>
+                )}
+              </Button>
+            </div>
             <Card className="border flex-grow-1 d-flex">
               <Card.Body className="p-0 d-flex flex-column">
                 {showIframe ? (
@@ -346,15 +308,13 @@ function EditHtmlTemplate(): JSX.Element {
           <div className="flex-grow-1 mb-3" style={{ minHeight: '300px' }}>
             <ChatBox
               onSendMessage={handleChatMessage}
-              // ={handleUpdateFromChat}
             />
           </div>
         </Row>
       </Col>
 
-      {/* Second Column: Chat and Deploy Panel */}
+      {/* Second Column: Deploy Panel */}
       <Col xs={12} lg={4} className="d-flex flex-column h-100">
-        {/* Deploy Panel */}
         <div className="flex-shrink-0">
           <DeployPanel />
         </div>

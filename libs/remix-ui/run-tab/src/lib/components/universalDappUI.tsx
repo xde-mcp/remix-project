@@ -310,12 +310,6 @@ export function UniversalDappUI(props: UdappProps) {
                     onClick={async () => {
                       try {
                         const data = await props.plugin.call('compilerArtefacts', 'getArtefactsByContractName', props.instance.name)
-                        const lastGenerated = await props.plugin.call('ai-dapp-generator', 'getLastGeneratedDapp', address)
-                        if (lastGenerated && Object.keys(lastGenerated).length > 0) {
-                          // Update the instance with the generated content
-                          props.editInstance(address, props.instance.abi, props.instance.name, data.artefact.devdoc, data.artefact.metadata, lastGenerated)
-                          return
-                        }
                         const description: string = await new Promise((resolve, reject) => {
                           const modalMessage = (
                             <ul className="p-3">
@@ -325,6 +319,8 @@ export function UniversalDappUI(props: UdappProps) {
                               <div>A new tab with the new website when the generation is done. This might take up to 2 minutes.</div>
                               <button className="btn btn-secondary btn-sm ms-2" onClick={async () => {
                                 await props.plugin.call('ai-dapp-generator', 'resetDapp', address)
+                                const lastGenerated = await props.plugin.call('ai-dapp-generator', 'getLastGeneratedDapp', address)
+                                props.editInstance(address, props.instance.abi, props.instance.name, data.artefact.devdoc, data.artefact.metadata, lastGenerated)
                                 props.plugin.call('manager', 'deactivatePlugin', 'iframeContent')
                               }}>Reset Dapp</button>
                             </ul>
@@ -475,8 +471,7 @@ export function UniversalDappUI(props: UdappProps) {
 
 const generateAIDappWithPlugin = async (description: string, address: string, contractData: any, props: UdappProps) => {
   try {
-    // Generate DApp using the plugin
-    const htmlContent = await props.plugin.call('ai-dapp-generator', 'generateDapp', {
+    const pages: Record<string, string> = await props.plugin.call('ai-dapp-generator', 'generateDapp', {
       description,
       address,
       abi: props.instance.abi || props.instance.contractData.abi,
@@ -484,8 +479,44 @@ const generateAIDappWithPlugin = async (description: string, address: string, co
       contractName: props.instance.name
     })
 
-    // Update the instance with the generated content
-    props.editInstance(address, props.instance.abi, props.instance.name, contractData.artefact.devdoc, contractData.artefact.metadata, htmlContent)
+    try {
+      await props.plugin.call('fileManager', 'remove', 'dapp')
+    } catch (e) {
+    }
+    await props.plugin.call('fileManager', 'mkdir', 'dapp')
+
+    for (const [rawFilename, content] of Object.entries(pages)) {
+      const safeParts = rawFilename.replace(/\\/g, '/')
+                                   .split('/')
+                                   .filter(part => part !== '..' && part !== '.' && part !== '');
+      
+      if (safeParts.length === 0) {
+        continue; 
+      }
+      const safeFilename = safeParts.join('/');
+      const fullPath = 'dapp/' + safeFilename;
+      
+      if (safeParts.length > 1) {
+        const subFolders = safeParts.slice(0, -1);
+        let currentPath = 'dapp';
+        for (const folder of subFolders) {
+          currentPath = `${currentPath}/${folder}`;
+          try {
+            await props.plugin.call('fileManager', 'mkdir', currentPath);
+          } catch (e) { }
+        }
+      }
+      await props.plugin.call('fileManager', 'writeFile', fullPath, content)
+    }
+    
+    props.editInstance(
+      address, 
+      props.instance.abi, 
+      props.instance.name, 
+      contractData.artefact.devdoc, 
+      contractData.artefact.metadata, 
+      pages
+    )
 
   } catch (error) {
     console.error('Error generating DApp:', error)
