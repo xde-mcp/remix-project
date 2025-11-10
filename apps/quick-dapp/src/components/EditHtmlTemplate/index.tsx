@@ -46,7 +46,8 @@ function EditHtmlTemplate(): JSX.Element {
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const builderRef = useRef<InBrowserVite | null>(null);
-
+  const { htmlTemplate } = appState.instance;
+  
   const runBuild = async () => {
     if (!iframeRef.current) {
       return;
@@ -105,9 +106,6 @@ function EditHtmlTemplate(): JSX.Element {
     try {
       if (hasBuildableFiles) {
         const result = await builder.build(mapFiles, '/src/main.jsx');
-
-        console.log({result})
-
         if (!result.success) {
           doc.open();
           doc.write(`<pre style="color: red; white-space: pre-wrap;">${result.error || 'Unknown build error'}</pre>`);
@@ -196,9 +194,11 @@ function EditHtmlTemplate(): JSX.Element {
 
   useEffect(() => {
     if (isBuilderReady) {
-      runBuild();
+      if (htmlTemplate) { 
+        runBuild();
+      }
     }
-  }, [isBuilderReady]);
+  }, [isBuilderReady, htmlTemplate]);
 
   return (
     <Row className="m-0 h-100">
@@ -257,12 +257,12 @@ function EditHtmlTemplate(): JSX.Element {
                 size="sm" 
                 onClick={runBuild} 
                 disabled={isBuilding}
-                data-id="quick-dapp-refresh-preview"
+                data-id="quick-dapp-apply-changes"
               >
                 {isBuilding ? (
                   <><i className="fas fa-spinner fa-spin me-1"></i> Building...</>
                 ) : (
-                  <><i className="fas fa-sync-alt me-1"></i> Refresh Preview</>
+                  <><i className="fas fa-play me-1"></i> Apply Code Changes</>
                 )}
               </Button>
             </div>
