@@ -69,9 +69,17 @@ export const CompilerContainer = (props: CompilerContainerProps) => {
   const [disableCompileButton, setDisableCompileButton] = useState<boolean>(false)
   const compileIcon = useRef(null)
   const promptMessageInput = useRef(null)
-  const [hhCompilation, sethhCompilation] = useState(false)
+  const [foundryCompilation, setFoundryCompilation] = useState(isFoundryProject)
+  const [hhCompilation, sethhCompilation] = useState(isHardhatProject)
   const [truffleCompilation, setTruffleCompilation] = useState(false)
   const [compilerContainer, dispatch] = useReducer(compilerReducer, compilerInitialState)
+  useEffect(() => {
+    setFoundryCompilation(isFoundryProject)
+  }, [isFoundryProject])
+
+  useEffect(() => {
+    sethhCompilation(isHardhatProject)
+  }, [isHardhatProject])
 
   const intl = useIntl()
 
@@ -439,6 +447,7 @@ export const CompilerContainer = (props: CompilerContainerProps) => {
     let externalCompType
     if (hhCompilation) externalCompType = 'hardhat'
     else if (truffleCompilation) externalCompType = 'truffle'
+    else if (foundryCompilation) externalCompType = 'foundry'
     compileTabLogic.runCompiler(externalCompType).catch((error) => {
       tooltip(error.message)
       compileIcon.current.classList.remove('remixui_bouncingIcon')
@@ -711,14 +720,21 @@ export const CompilerContainer = (props: CompilerContainerProps) => {
 
   const updatehhCompilation = (event) => {
     const checked = event.target.checked
-    if (checked) setTruffleCompilation(false) // wayaround to reset the variable
+    if (checked) sethhCompilation(false) // wayaround to reset the variable
     sethhCompilation(checked)
     api.setAppParameter('hardhat-compilation', checked)
   }
 
+  const updateFoundryCompilation = (event) => {
+    const checked = event.target.checked
+    if (checked) setFoundryCompilation(false) // wayaround to reset the variable
+    setFoundryCompilation(checked)
+    api.setAppParameter('foundry-compilation', checked)
+  }
+
   const updateTruffleCompilation = (event) => {
     const checked = event.target.checked
-    if (checked) sethhCompilation(false) // wayaround to reset the variable
+    if (checked) setTruffleCompilation(false) // wayaround to reset the variable
     setTruffleCompilation(checked)
     api.setAppParameter('truffle-compilation', checked)
   }
@@ -820,6 +836,35 @@ export const CompilerContainer = (props: CompilerContainerProps) => {
               <FormattedMessage id="solidity.hideWarnings" />
             </label>
           </div>
+          {isFoundryProject && (
+            <div className="mt-3 remixui_compilerConfig form-check">
+              <input
+                className="form-check-input"
+                onChange={updateFoundryCompilation}
+                id="enableFoundry"
+                type="checkbox"
+                title="Enable Foundry Compilation"
+                checked={foundryCompilation}
+              />
+              <label className="form-check-label" htmlFor="enableFoundry">
+                <FormattedMessage id="solidity.enableFoundry" />
+              </label>
+              <a className="mt-1 text-nowrap" href="https://remix-ide.readthedocs.io/en/latest/foundry.html#enable-foundry-compilation" target={'_blank'}>
+                <CustomTooltip
+                  placement={'right'}
+                  tooltipClasses="text-nowrap"
+                  tooltipId="overlay-tooltip-foundry"
+                  tooltipText={
+                    <span className="border bg-light text-dark p-1 pe-3" style={{ minWidth: '230px' }}>
+                      <FormattedMessage id="solidity.learnFoundry" />
+                    </span>
+                  }
+                >
+                  <i className={'ms-2 fas fa-info'} aria-hidden="true"></i>
+                </CustomTooltip>
+              </a>
+            </div>
+          )}
           {isHardhatProject && (
             <div className="mt-3 remixui_compilerConfig form-check">
               <input

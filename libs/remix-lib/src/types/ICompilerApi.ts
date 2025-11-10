@@ -43,6 +43,7 @@ export interface ICompilerApi {
 
     logToTerminal: (log: terminalLog) => void
 
+    compileWithFoundry: (configPath: string) => Promise<string>
     compileWithHardhat: (configPath: string) => Promise<string>
     compileWithTruffle: (configPath: string) => Promise<string>
     statusChanged: (data: { key: string, title?: string, type?: string }) => void,

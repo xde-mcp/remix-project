@@ -234,6 +234,30 @@ export class CompileTabLogic {
               this.api.logToTerminal({ type: 'error', value: error })
             })
           }
+        } else if (externalCompType === 'foundry') {
+          const { currentVersion, optimize, runs } = this.compiler.state
+          if (currentVersion) {
+            const fileContent = `module.exports = {
+              solidity: '${currentVersion.substring(0, currentVersion.indexOf('+commit'))}',
+              settings: {
+                optimizer: {
+                  enabled: ${optimize},
+                  runs: ${runs}
+                }
+              }
+            }
+            `
+            const configFilePath = 'remix-compiler.config.js'
+            this.api.writeFile(configFilePath, fileContent)
+            if (window._matomoManagerInstance) {
+              window._matomoManagerInstance.trackEvent('compiler', 'runCompile', 'compileWithFoundry')
+            }
+            this.api.compileWithFoundry(configFilePath).then((result) => {
+              this.api.logToTerminal({ type: 'log', value: result })
+            }).catch((error) => {
+              this.api.logToTerminal({ type: 'error', value: error })
+            })
+          }
         }
       }
       // TODO readd saving current file

@@ -110,33 +110,45 @@ class FoundryPluginClient extends ElectronBasePluginRemixdClient {
         return true
     }
 
+    private async emitContract(file: string, cache) {
+        const path = join(this.buildPath, file) // out/Counter.sol/
+        const compilationResult = {
+            input: {},
+            output: {
+                contracts: {},
+                sources: {}
+            },
+            inputSources: { sources: {}, target: '' },
+            solcVersion: null,
+            compilationTarget: null
+        }
+        compilationResult.inputSources.target = file
+        await this.readContract(path, compilationResult, cache)
+        this.emit('compilationFinished', compilationResult.compilationTarget, { sources: compilationResult.input }, 'soljson', compilationResult.output, compilationResult.solcVersion)
+    }
+
     private async processArtifact() {
         if (!this.checkPath()) return
         const folderFiles = await fs.promises.readdir(this.buildPath) // "out" folder
+        console.log('Foundry compilation detected, processing artifact...', folderFiles)
         try {
             const cache = JSON.parse(await fs.promises.readFile(join(this.cachePath, 'solidity-files-cache.json'), { encoding: 'utf-8' }))
+            const currentFile = await this.call('fileManager', 'getCurrentFile')
             // name of folders are file names
             for (const file of folderFiles) {
-                const path = join(this.buildPath, file) // out/Counter.sol/
-                const compilationResult = {
-                    input: {},
-                    output: {
-                        contracts: {},
-                        sources: {}
-                    },
-                    inputSources: { sources: {}, target: '' },
-                    solcVersion: null,
-                    compilationTarget: null
-                }
-                compilationResult.inputSources.target = file
-                await this.readContract(path, compilationResult, cache)
-                this.emit('compilationFinished', compilationResult.compilationTarget, { sources: compilationResult.input }, 'soljson', compilationResult.output, compilationResult.solcVersion)
+                if (file !== basename(currentFile)) {
+                    await this.emitContract(file, cache)
+                }                
             }
-
+            if (folderFiles.includes(basename(currentFile))) {
+                console.log('emitting current file', currentFile, basename(currentFile))
+                await this.emitContract(basename(currentFile), cache) // we emit the current file at the end to make sure it is the last one
+            }
+            
             clearTimeout(this.logTimeout)
             this.logTimeout = setTimeout(() => {
                 // @ts-ignore
-                this.call('terminal', 'log', { type: 'log', value: `receiving compilation result from Foundry. Select a file to populate the contract interaction interface.` })
+                // this.call('terminal', 'log', { type: 'log', value: `receiving compilation result from Foundry. Select a file to populate the contract interaction interface.` })
                 console.log('Syncing compilation result from Foundry')
             }, 1000)
 

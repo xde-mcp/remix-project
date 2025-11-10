@@ -82,11 +82,12 @@ export const SolidityCompiler = (props: SolidityCompilerProps) => {
 
   api.onSetWorkspace = async (isLocalhost: boolean, workspaceName: string) => {
     const isDesktop = platform === appPlatformTypes.desktop
-
+    
     const isHardhat = (isLocalhost || isDesktop) && (await compileTabLogic.isHardhatProject())
     const isTruffle = (isLocalhost || isDesktop) && (await compileTabLogic.isTruffleProject())
     const isFoundry = (isLocalhost || isDesktop) && (await compileTabLogic.isFoundryProject())
-
+    console.log('Solidity compiler detected workspace change', { isLocalhost, workspaceName, isDesktop, isFoundry })
+    
     setState((prevState) => {
       return {
         ...prevState,

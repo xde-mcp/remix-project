@@ -110,6 +110,10 @@ export const CompilerApiMixin = (Base) => class extends Base {
     return this.call('hardhat', 'compile', configFile)
   }
 
+  compileWithFoundry (configFile) {
+    return this.call('foundry', 'compile', configFile)
+  }
+
   compileWithTruffle (configFile) {
     return this.call('truffle', 'compile', configFile)
   }
@@ -256,6 +260,11 @@ export const CompilerApiMixin = (Base) => class extends Base {
       if (this.onSetWorkspace) this.onSetWorkspace(workspace.isLocalhost, workspace.name)
     })
 
+    this.on('fs', 'workingDirChanged', (path) => {
+      this.resetResults()
+      if (this.onSetWorkspace) this.onSetWorkspace(true, 'localhost')
+    })
+
     this.on('fileManager', 'fileRemoved', (path) => {
       if (this.onFileRemoved) this.onFileRemoved(path)
     })
@@ -366,6 +375,7 @@ export const CompilerApiMixin = (Base) => class extends Base {
         if (this.currentFile && (this.currentFile.endsWith('.sol') || this.currentFile.endsWith('.yul'))) {
           if (await this.getAppParameter('hardhat-compilation')) this.compileTabLogic.runCompiler('hardhat')
           else if (await this.getAppParameter('truffle-compilation')) this.compileTabLogic.runCompiler('truffle')
+          else if (await this.getAppParameter('foundry-compilation')) this.compileTabLogic.runCompiler('foundry')
           else this.compileTabLogic.runCompiler(undefined).catch((error) => {
             this.call('notification', 'toast', error.message)
           })
