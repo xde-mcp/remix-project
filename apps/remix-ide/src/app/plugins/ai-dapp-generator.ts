@@ -51,13 +51,12 @@ export class AIDappGenerator extends Plugin {
         { role: 'user', content: message }
       ]
 
-      const htmlContent = await this.callLLMAPI(messagesToSend) 
+      const htmlContent = await this.callLLMAPI(messagesToSend, INITIAL_SYSTEM_PROMPT)
 
       const pages = parsePages(htmlContent)
-      
       context.messages = [
         { role: 'user', content: message },
-        { role: 'assistant', content: htmlContent }
+       { role: 'assistant', content: htmlContent }
       ]
       this.saveContext(options.address, context)
 
@@ -80,21 +79,24 @@ export class AIDappGenerator extends Plugin {
   /**
    * Update an existing DApp with new description
    */
-  async updateDapp(address: string, description: string): Promise<Pages> {
-    const context = this.getOrCreateContext(address)
+  async updateDapp(address: string, description: string, currentFiles: Pages): Promise<Pages> {
+      const context = this.getOrCreateContext(address)
 
     if (context.messages.length === 0) {
       throw new Error('No existing DApp found for this address. Please generate one first.')
     }
 
-    const message = this.createUpdateMessage(description)
+    const message = this.createUpdateMessage(description, currentFiles)
     context.messages.push({ role: 'user', content: message })
 
     try {
-      const htmlContent = await this.callLLMAPI(context.messages)
+      const htmlContent = await this.callLLMAPI(context.messages, FOLLOW_UP_SYSTEM_PROMPT)
 
-      const currentPages: Pages = await this.getLastGeneratedDapp(address) || {}
-      const pages = parsePagesFollowUp(htmlContent, currentPages)
+      const pages = parsePages(htmlContent) 
+
+      if (Object.keys(pages).length === 0) {
+        throw new Error("AI failed to return valid file structure. Check logs.");
+      }
 
       context.messages.push({ role: 'assistant', content: htmlContent })
       this.saveContext(address, context)
@@ -155,11 +157,10 @@ export class AIDappGenerator extends Plugin {
     if (context) {
       for (const message of context.messages) {
         if (message.role === 'assistant') {
-          if ((message.content.indexOf(UPDATE_PAGE_START) === -1)) {
-            currentPages = parsePages(message.content)
-          } else {
-            currentPages = parsePagesFollowUp(message.content, currentPages)
-          }          
+          const newPages = parsePages(message.content)
+          if (Object.keys(newPages).length > 0) {
+            currentPages = newPages
+          }
         }
       }
     }
@@ -175,12 +176,12 @@ export class AIDappGenerator extends Plugin {
 
   private createInitialMessage(options: GenerateDappOptions): string {
     const providerCode = this.getProviderCode()
-    return INITIAL_SYSTEM_PROMPT + `. \n The website should interact the smart contract deployed at this address: ${options.address} on ${options.chainId} network. The ABI of the contract is: ${JSON.stringify(options.abi)}. Put the following code in the header to be able to connect to the blockchain:${providerCode}. Follow the design and features proposed in this description: ${options.description}`
+    return `. \n The website should interact the smart contract deployed at this address: ${options.address} on ${options.chainId} network. The ABI of the contract is: ${JSON.stringify(options.abi)}. Put the following code in the header to be able to connect to the blockchain:${providerCode}. Follow the design and features proposed in this description: ${options.description}`  
   }
 
-  private createUpdateMessage(description: string): string {
-    const providerCode = this.getProviderCode()
-    return FOLLOW_UP_SYSTEM_PROMPT + `. \n Update the website to satisfy the following description: ${description}.`
+  private createUpdateMessage(description: string, currentFiles: Pages): string {
+    const filesString = JSON.stringify(currentFiles, null, 2);
+    return `Here is the full code of my current project:\n\n${filesString}\n\nNow, please apply the following update based on this current code: ${description}. Remember to return ALL project files in the specified START_TITLE format.`
   }
 
   private getProviderCode(): string {
@@ -194,7 +195,7 @@ export class AIDappGenerator extends Plugin {
 </script>`
   }
 
-  private async callLLMAPI(messages: any[]): Promise<string> {
+  private async callLLMAPI(messages: any[], systemPrompt: string): Promise<string> {
     const param = new QueryParams()
     const apikey = param.get()['fireworksapikey']
 
@@ -217,7 +218,10 @@ export class AIDappGenerator extends Plugin {
         presence_penalty: 0,
         frequency_penalty: 0,
         temperature: 0.6,
-        messages: messages
+        messages: [
+          { role: 'system', content: systemPrompt },
+          ...messages
+        ]
       })
     })
 

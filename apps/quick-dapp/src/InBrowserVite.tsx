@@ -210,13 +210,11 @@ export class InBrowserVite {
           }
 
           const cdnPath = `https://esm.sh/${args.path}`;
-          console.log(`[InBrowserVite] Resolved '${args.path}' to external CDN: ${cdnPath}`);
           
           return { path: cdnPath, external: true };
         });
 
         build.onLoad({ filter: /\.css$/, namespace: 'local' }, async (args: any) => {
-          console.log(`[InBrowserVite-LOG] CSS 파일 "${args.path}"를 'css-in-js'로 변환합니다.`);
           
           const pathsToTry = [
             args.path,

@@ -153,13 +153,66 @@ function EditHtmlTemplate(): JSX.Element {
 
   const handleChatMessage = async (message: string) => {
     try {
-      await remixClient.call('ai-dapp-generator' as any, 'updateDapp', appState.instance.address, message)
+    const currentFiles = new Map<string, string>();
+    await readDappFiles('dapp', currentFiles);
 
-      runBuild(); 
+    const currentFilesObject: Pages = Object.fromEntries(currentFiles);
+    
+    const pages: Record<string, string> = await remixClient.call(
+      'ai-dapp-generator' as any,
+      'updateDapp',
+      appState.instance.address,
+      message,
+      currentFilesObject
+    );
+    
+    try {
+      await remixClient.call('fileManager', 'remove', 'dapp');
+    } catch (e) {}
+    
+    await remixClient.call('fileManager', 'mkdir', 'dapp');
+
+    const writePromises = [];
+    const createdFolders = new Set<string>(['dapp']);
+
+    for (const [rawFilename, content] of Object.entries(pages)) {
+      const safeParts = rawFilename.replace(/\\/g, '/')
+                        .split('/')
+                        .filter(part => part !== '..' && part !== '.' && part !== '');
+    
+      if (safeParts.length === 0) {
+        continue;
+      }
+      const safeFilename = safeParts.join('/');
+      const fullPath = 'dapp/' + safeFilename;
+    
+      writePromises.push(
+      (async () => {
+        if (safeParts.length > 1) {
+          const subFolders = safeParts.slice(0, -1);
+          let currentPath = 'dapp';
+          for (const folder of subFolders) {
+            currentPath = `${currentPath}/${folder}`;
+            if (!createdFolders.has(currentPath)) {
+            try {
+              await remixClient.call('fileManager', 'mkdir', currentPath);
+              createdFolders.add(currentPath);
+            } catch (e) {}
+            }
+          }
+        }
+        await remixClient.call('fileManager', 'writeFile', fullPath, content);
+      })()
+      );
+    }
+
+    await Promise.all(writePromises);
+    runBuild();
 
     } catch (error) {
-      console.error('Error updating DApp via chat:', error)
-      setIframeError('Failed to update DApp via AI: ' + error.message);
+      const errorMsg = (error instanceof Error) ? error.message : String(error);
+      console.error('[DEBUG-LOG E] (ERROR) handleChatMessage:', errorMsg);
+      setIframeError('Failed to update DApp via AI: ' + errorMsg);
     }
   };
 
