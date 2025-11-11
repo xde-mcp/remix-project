@@ -9,6 +9,9 @@ import {
 import { ThemeUI } from './theme';
 import { CustomTooltip } from '@remix-ui/helper';
 import { AppContext } from '../../contexts';
+import IpfsHttpClient from 'ipfs-http-client';
+import { readDappFiles } from '../EditHtmlTemplate';
+import { InBrowserVite } from '../../InBrowserVite';
 
 function DeployPanel(): JSX.Element {
   const intl = useIntl()
@@ -18,6 +21,73 @@ function DeployPanel(): JSX.Element {
     shortname: localStorage.getItem('__DISQUS_SHORTNAME') || '',
     shareTo: [],
   });
+
+  const [showIpfsSettings, setShowIpfsSettings] = useState(false);
+  const [ipfsHost, setIpfsHost] = useState('');
+  const [ipfsPort, setIpfsPort] = useState('');
+  const [ipfsProtocol, setIpfsProtocol] = useState('');
+  const [ipfsProjectId, setIpfsProjectId] = useState('');
+  const [ipfsProjectSecret, setIpfsProjectSecret] = useState('');
+  const [isDeploying, setIsDeploying] = useState(false);
+  const [deployResult, setDeployResult] = useState({ cid: '', error: '' }); 
+
+  const getRemixIpfsSettings = () => {
+    let result = null;
+
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+
+      if (key && key.includes('remix.config')) {
+        try {
+          const data = JSON.parse(localStorage.getItem(key));
+
+          if (data && data["settings/ipfs-url"]) {
+            result = {
+              url: data["settings/ipfs-url"] || null,
+              port: data["settings/ipfs-port"] || null,
+              protocol: data["settings/ipfs-protocol"] || null,
+              projectId: data["settings/ipfs-project-id"] || null,
+              projectSecret: data["settings/ipfs-project-secret"] || null,
+            };
+            break;
+          }
+        } catch (err) {
+          console.warn(`⚠️ ${key} JSON parse error:`, err);
+        }
+      }
+    }
+
+    return result;
+  }
+
+  useEffect(() => {
+    const loadGlobalIpfsSettings = () => {
+      try {
+        const ipfsSettings = getRemixIpfsSettings();
+
+        if (ipfsSettings && ipfsSettings.url) {
+          const { 
+            url: host, 
+            port, 
+            protocol, 
+            projectId: id, 
+            projectSecret: secret 
+          } = ipfsSettings;
+
+          setIpfsHost(host);
+          setIpfsPort(port || '5001');
+          setIpfsProtocol(protocol || 'https');
+          setIpfsProjectId(id || '');
+          setIpfsProjectSecret(secret || '');
+        } 
+      } catch (e) {
+        console.error(e);
+      }
+      setShowIpfsSettings(true);
+    };
+    loadGlobalIpfsSettings();
+  }, []);
+
   const setShareTo = (type: string) => {
     let shareTo = formVal.shareTo;
     if (formVal.shareTo.includes(type)) {
@@ -26,6 +96,120 @@ function DeployPanel(): JSX.Element {
       shareTo.push(type);
     }
     setFormVal({ ...formVal, shareTo });
+  };
+
+  const handleIpfsDeploy = async () => {
+    setIsDeploying(true);
+    setDeployResult({ cid: '', error: '' });
+
+    let builder: InBrowserVite;
+    let jsResult: { js: string; success: boolean; error?: string };
+    let filesMap: Map<string, string>;
+
+    try {
+      builder = new InBrowserVite();
+      await builder.initialize();
+
+      filesMap = new Map<string, string>();
+      await readDappFiles('dapp', filesMap);
+
+      if (filesMap.size === 0) {
+        throw new Error("No DApp files");
+      }
+
+      jsResult = await builder.build(filesMap, '/src/main.jsx');
+      if (!jsResult.success) {
+        throw new Error(`DApp build failed: ${jsResult.error}`);
+      }
+
+    } catch (e) {
+      console.error(e);
+      setDeployResult({ cid: '', error: `DApp build failed: ${e.message}` });
+      setIsDeploying(false);
+      return;
+    }
+
+
+    let ipfsClient;
+    try {
+      const auth = (ipfsProjectId && ipfsProjectSecret)
+        ? 'Basic ' + Buffer.from(ipfsProjectId + ':' + ipfsProjectSecret).toString('base64')
+        : null;
+        
+      const headers = auth ? { Authorization: auth } : {};
+      
+      let clientOptions;
+      if (ipfsHost) {
+        clientOptions = {
+          host: ipfsHost.replace(/^(https|http):\/\//, ''), 
+          port: parseInt(ipfsPort) || 5001,
+          protocol: ipfsProtocol || 'https',
+          headers
+        };
+      } else {
+         clientOptions = { host: 'ipfs.infura.io', port: 5001, protocol: 'https', headers };
+      }
+      
+      ipfsClient = IpfsHttpClient(clientOptions);
+
+    } catch (e) {
+      console.error(e);
+      setDeployResult({ cid: '', error: `IPFS: ${e.message}` });
+      setIsDeploying(false);
+      return;
+    }
+
+    try {
+      const indexHtmlContent = filesMap.get('/index.html');
+      if (!indexHtmlContent) {
+        throw new Error("Cannot find index.html");
+      }
+
+      let modifiedHtml = indexHtmlContent;
+
+      modifiedHtml = modifiedHtml.replace(
+        /<script type="module"[^>]*src="(?:\/|\.\/)?src\/main\.jsx"[^>]*><\/script>/, 
+        '<script type="module" src="./app.js"></script>'
+      );
+      
+      modifiedHtml = modifiedHtml.replace(
+        /<link rel="stylesheet"[^>]*href="(?:\/|\.\/)?src\/index\.css"[^>]*>/, 
+        ''
+      );
+
+      const filesToUpload = [
+        {
+          path: 'index.html',
+          content: modifiedHtml
+        },
+        {
+          path: 'app.js',
+          content: jsResult.js
+        }
+      ];
+
+      const addOptions = {
+        wrapWithDirectory: true,
+        cidVersion: 1,
+      };
+      
+      let rootCid = '';
+      for await (const result of ipfsClient.addAll(filesToUpload, addOptions)) {
+        if (result.path === '') { 
+          rootCid = result.cid.toString();
+        }
+      }
+      
+      setDeployResult({ cid: rootCid, error: '' });
+      setIsDeploying(false);
+      
+      if (showIpfsSettings && ipfsHost) {
+      }
+
+    } catch (e) {
+      setDeployResult({ cid: '', error: `IPFS: ${e.message}` });
+      setIsDeploying(false); 
+    }
   };
   
   return (
@@ -182,20 +366,72 @@ function DeployPanel(): JSX.Element {
             </label>
           </div>
         </Form.Group>
+
         <ThemeUI />
         
-        <Button
-          data-id="deployDapp-IPFS"
-          variant="primary"
-          type="button" // type="submit"에서 변경
-          className="mt-3"
-          onClick={() => {
-            console.log("Deploying to IPFS/ENS... (TODO)");
-          }}
-        >
-          <FormattedMessage id="quickDapp.deployToIPFS" defaultMessage="Deploy to IPFS & ENS" />
-        </Button>
-      </Form>
+        {showIpfsSettings && (
+          <>
+            <hr />
+            <h5 className="mb-2"><FormattedMessage id="quickDapp.ipfsSettings" defaultMessage="IPFS Settings" /></h5>
+            <Alert variant="info" className="mb-2 small">
+              <FormattedMessage id="quickDapp.ipfsSettings.info" defaultMessage="No global IPFS settings found. Please provide credentials below, or configure them in the 'Settings' plugin." />
+            </Alert>
+            <Form.Group className="mb-2" controlId="formIpfsHost">
+              <Form.Label className="text-uppercase mb-0">IPFS Host</Form.Label>
+              <Form.Control type="text" placeholder="e.g., ipfs.infura.io" value={ipfsHost} onChange={(e) => setIpfsHost(e.target.value)} />
+            </Form.Group>
+            <Form.Group className="mb-2" controlId="formIpfsPort">
+              <Form.Label className="text-uppercase mb-0">IPFS Port</Form.Label>
+              <Form.Control type="text" placeholder="e.g., 5001" value={ipfsPort} onChange={(e) => setIpfsPort(e.target.value)} />
+            </Form.Group>
+            <Form.Group className="mb-2" controlId="formIpfsProtocol">
+              <Form.Label className="text-uppercase mb-0">IPFS Protocol</Form.Label>
+              <Form.Control type="text" placeholder="e.g., https" value={ipfsProtocol} onChange={(e) => setIpfsProtocol(e.target.value)} />
+            </Form.Group>
+            <Form.Group className="mb-2" controlId="formIpfsProjectId">
+              <Form.Label className="text-uppercase mb-0">Project ID (Optional)</Form.Label>
+              <Form.Control type="text" placeholder="Infura Project ID" value={ipfsProjectId} onChange={(e) => setIpfsProjectId(e.target.value)} />
+            </Form.Group>
+            <Form.Group className="mb-2" controlId="formIpfsProjectSecret">
+              <Form.Label className="text-uppercase mb-0">Project Secret (Optional)</Form.Label>
+              <Form.Control type="password" placeholder="Infura Project Secret" value={ipfsProjectSecret} onChange={(e) => setIpfsProjectSecret(e.target.value)} />
+            </Form.Group>
+          </>
+        )}
+        <hr />
+
+        <Button
+          data-id="deployDapp-IPFS"
+          variant="primary"
+          type="button"
+          className="mt-3 w-100"
+          onClick={handleIpfsDeploy}
+          disabled={isDeploying || (showIpfsSettings && !ipfsHost)}
+        >
+          {isDeploying ? (
+            <><i className="fas fa-spinner fa-spin me-1"></i> <FormattedMessage id="quickDapp.deploying" defaultMessage="Deploying..." /></>
+          ) : (
+            <FormattedMessage id="quickDapp.deployToIPFS" defaultMessage="Deploy to IPFS" />
+          )}
+        </Button>
+
+        {deployResult.cid && (
+          <Alert variant="success" className="mt-3 small" style={{ wordBreak: 'break-all' }}>
+            <div className="fw-bold">Deployed Successfully!</div>
+            <div><strong>CID:</strong> {deployResult.cid}</div>
+            <hr className="my-2" />
+            <a href={`https://gateway.ipfs.io/ipfs/${deployResult.cid}`} target="_blank" rel="noopener noreferrer">
+              View on ipfs.io Gateway
+            </a>
+          </Alert>
+        )}
+        {deployResult.error && (
+          <Alert variant="danger" className="mt-3 small">
+            {deployResult.error}
+          </Alert>
+        )}
+
+      </Form>
     </div>
   );
 }

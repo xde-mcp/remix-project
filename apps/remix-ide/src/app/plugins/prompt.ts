@@ -44,11 +44,11 @@ ${TITLE_PAGE_START}index.html${TITLE_PAGE_END}
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>DApp</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="/src/index.css">
+    <link rel="stylesheet" href="./src/index.css">
   </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
+    <script type="module" src="./src/main.jsx"></script>
   </body>
 </html>
 \`\`\`
@@ -122,11 +122,11 @@ ${TITLE_PAGE_START}index.html${TITLE_PAGE_END}
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>DApp</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="/src/index.css">
+    <link rel="stylesheet" href="./src/index.css">
   </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
+    <script type="module" src="./src/main.jsx"></script>
   </body>
 </html>
 \`\`\`

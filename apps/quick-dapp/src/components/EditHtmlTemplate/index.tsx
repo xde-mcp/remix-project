@@ -16,7 +16,7 @@ export interface ParsedPagesResult {
   pages: Pages
 }
 
-const readDappFiles = async (path: string, map: Map<string, string>) => {
+export const readDappFiles = async (path: string, map: Map<string, string>) => {
   try {
     const files = await remixClient.call('fileManager', 'readdir', path);
     
