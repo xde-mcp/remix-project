@@ -1,5 +1,6 @@
 import React, { useContext, useState, useEffect } from 'react';
-import { Form, Button, Alert, InputGroup } from 'react-bootstrap';
+import { Form, Button, Alert, Card } from 'react-bootstrap';
+import { ethers, namehash } from 'ethers';
 import { FormattedMessage, useIntl } from 'react-intl';
 import {
   emptyInstance,
@@ -12,6 +13,12 @@ import { AppContext } from '../../contexts';
 import IpfsHttpClient from 'ipfs-http-client';
 import { readDappFiles } from '../EditHtmlTemplate';
 import { InBrowserVite } from '../../InBrowserVite';
+import * as contentHash  from 'content-hash';
+import { CID } from 'multiformats/cid';
+
+const ENS_RESOLVER_ABI = [
+  "function setContenthash(bytes32 node, bytes calldata hash) external"
+];
 
 function DeployPanel(): JSX.Element {
   const intl = useIntl()
@@ -30,6 +37,10 @@ function DeployPanel(): JSX.Element {
   const [ipfsProjectSecret, setIpfsProjectSecret] = useState('');
   const [isDeploying, setIsDeploying] = useState(false);
   const [deployResult, setDeployResult] = useState({ cid: '', error: '' }); 
+
+  const [ensName, setEnsName] = useState('');
+  const [isEnsLoading, setIsEnsLoading] = useState(false);
+  const [ensResult, setEnsResult] = useState({ success: '', error: '' });
 
   const getRemixIpfsSettings = () => {
     let result = null;
@@ -52,7 +63,7 @@ function DeployPanel(): JSX.Element {
             break;
           }
         } catch (err) {
-          console.warn(`⚠️ ${key} JSON parse error:`, err);
+          console.warn(`${key} JSON parse error:`, err);
         }
       }
     }
@@ -188,18 +199,11 @@ function DeployPanel(): JSX.Element {
         }
       ];
 
-      const addOptions = {
-        wrapWithDirectory: true,
-        cidVersion: 1,
-      };
-      
-      let rootCid = '';
-      for await (const result of ipfsClient.addAll(filesToUpload, addOptions)) {
-        if (result.path === '') { 
-          rootCid = result.cid.toString();
-        }
+      let last: any;
+      for await (const r of ipfsClient.addAll(filesToUpload, { wrapWithDirectory: true })) {
+        last = r;
       }
-      
+      const rootCid = last?.cid?.toString() || '';
       setDeployResult({ cid: rootCid, error: '' });
       setIsDeploying(false);
       
@@ -212,6 +216,72 @@ function DeployPanel(): JSX.Element {
     }
   };
   
+  const handleEnsLink = async () => {
+    setIsEnsLoading(true);
+    setEnsResult({ success: '', error: '' });
+
+    if (!ensName || !deployResult.cid) {
+      setEnsResult({ success: '', error: 'ENS name or IPFS CID is missing.' });
+      setIsEnsLoading(false);
+      return;
+    }
+    if (typeof window.ethereum === 'undefined') {
+      setEnsResult({ success: '', error: 'MetaMask (or a compatible wallet) is not installed.' });
+      setIsEnsLoading(false);
+      return;
+    }
+
+    try {
+      const provider = new ethers.BrowserProvider(window.ethereum as any);
+      await provider.send('eth_requestAccounts', []);
+      const signer = await provider.getSigner();
+
+      const network = await provider.getNetwork();
+      if (network.chainId !== 1n) {
+        throw new Error('Updating ENS records is supported only on Ethereum Mainnet (Chain ID: 1). Please switch your wallet network.');
+      }
+
+      const userAddress = await signer.getAddress();
+
+      const ownerAddress = await provider.resolveName(ensName);
+
+      if (!ownerAddress) {
+        throw new Error(`'${ensName}' is not registered.`);
+      }
+      if (ownerAddress.toLowerCase() !== userAddress.toLowerCase()) {
+        throw new Error(`The current wallet (${userAddress.slice(0, 6)}...) does not match the address record of '${ensName}'.`);
+      }
+
+      const resolver = await provider.getResolver(ensName);
+      if (!resolver) {
+        throw new Error(`Resolver for '${ensName}' was not found.`);
+      }
+
+      const writeableResolver = new ethers.Contract(resolver.address, ENS_RESOLVER_ABI, signer);
+
+      const pureCid = deployResult.cid.replace(/^ipfs:\/\//, '');
+      const cidForEns = CID.parse(pureCid).version === 0 ? pureCid : CID.parse(pureCid).toV0().toString();
+
+      const chHex = '0x' + contentHash.encode('ipfs-ns', cidForEns);
+      const node = namehash(ensName);
+
+      const tx = await writeableResolver.setContenthash(node, chHex);
+      setEnsResult({ success: 'Transaction sent. Waiting for confirmation...', error: '' });
+      await tx.wait();
+
+      setEnsResult({ success: `'${ensName}' has been updated to the new DApp CID successfully!`, error: '' });
+    } catch (e: any) {
+      console.error(e);
+      let message = e.message;
+      if (e.code === 'UNSUPPORTED_OPERATION' && e.message?.includes('setContenthash')) {
+        message = "The current resolver doesn't support 'setContenthash'. You may need to switch to the Public Resolver in the ENS Manager.";
+      }
+      setEnsResult({ success: '', error: `Failed to update ENS: ${message}` });
+    } finally {
+      setIsEnsLoading(false);
+    }
+  };
+
   return (
     <div className="d-inline-block">
       <h3 className="mb-3" data-id="quick-dapp-admin">QuickDapp <FormattedMessage id="quickDapp.admin" /></h3>
@@ -373,9 +443,14 @@ function DeployPanel(): JSX.Element {
           <>
             <hr />
             <h5 className="mb-2"><FormattedMessage id="quickDapp.ipfsSettings" defaultMessage="IPFS Settings" /></h5>
-            <Alert variant="info" className="mb-2 small">
-              <FormattedMessage id="quickDapp.ipfsSettings.info" defaultMessage="No global IPFS settings found. Please provide credentials below, or configure them in the 'Settings' plugin." />
-            </Alert>
+            {showIpfsSettings && (!ipfsHost || !ipfsPort || !ipfsProtocol) && (
+              <Alert variant="info" className="mb-2 small">
+                <FormattedMessage
+                  id="quickDapp.ipfsSettings.info"
+                  defaultMessage="No global IPFS settings found. Please provide credentials below, or configure them in the 'Settings' plugin."
+                />
+              </Alert>
+            )}
             <Form.Group className="mb-2" controlId="formIpfsHost">
               <Form.Label className="text-uppercase mb-0">IPFS Host</Form.Label>
               <Form.Control type="text" placeholder="e.g., ipfs.infura.io" value={ipfsHost} onChange={(e) => setIpfsHost(e.target.value)} />
@@ -431,6 +506,40 @@ function DeployPanel(): JSX.Element {
           </Alert>
         )}
 
+        {deployResult.cid && (
+          <Card className="mt-3">
+            <Card.Body>
+              <h5 className="mb-3">Link to ENS</h5>
+              <Form.Group className="mb-2" controlId="formEnsName">
+                <Form.Label className="text-uppercase mb-0">ENS Name</Form.Label>
+                <Form.Control 
+                  type="text" 
+                  placeholder="e.g., my-dapp.eth" 
+                  value={ensName} 
+                  onChange={(e) => setEnsName(e.target.value)} 
+                />
+              </Form.Group>
+              <Button 
+                variant="secondary" 
+                className="w-100" 
+                onClick={handleEnsLink} 
+                disabled={isEnsLoading || !ensName}
+              >
+                {isEnsLoading ? (
+                  <><i className="fas fa-spinner fa-spin me-1"></i> Linking to ENS...</>
+                ) : (
+                  'Link ENS Name (Mainnet Only)'
+                )}
+              </Button>
+              {ensResult.success && (
+                <Alert variant="success" className="mt-3 small">{ensResult.success}</Alert>
+              )}
+              {ensResult.error && (
+                <Alert variant="danger" className="mt-3 small">{ensResult.error}</Alert>
+              )}
+            </Card.Body>
+          </Card>
+        )}
       </Form>
     </div>
   );

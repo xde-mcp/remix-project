@@ -7,7 +7,10 @@
     "@dnd-kit/core": "^6.1.0",
     "@dnd-kit/sortable": "^8.0.0",
     "@drafish/surge-client": "^1.1.5",
+    "cid": "multiformats/cid",
+    "content-hash": "^2.5.2",
     "esbuild-wasm": "^0.25.12",
+    "ethers": "^6.15.0",
     "ipfs-http-client": "^47.0.1"
   }
 }
