@@ -1,43 +1,40 @@
-.remixui_tooltip {
-    z-index: 1001;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    position: fixed;
-    min-height: 50px;
-    padding: 16px 24px 12px;
-    border-radius: 3px;
-    left: 40%;
-    font-size: 14px;
-    text-align: center;
-    bottom: -0px;
-    flex-direction: row;
+/* Sonner toast styling */
+.remixui_sonner_toast {
+  border-radius: 8px;
+  padding: 16px 24px;
+  font-size: 14px;
+  min-width: 300px;
+  max-width: 500px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
-@-webkit-keyframes remixui_animatebottom  {
-  0% {bottom: -300px}
-  100% {bottom: 0px}
+
+.remixui_custom_toast {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
-@keyframes remixui_animatebottom  {
-  0% {bottom: -300px}
-  100% {bottom: 0px}
+
+/* Override Sonner default styles to match Remix theme */
+[data-sonner-toaster] {
+  z-index: 1001 !important;
 }
-@-webkit-keyframes remixui_animatetop  {
-  0% {bottom: 0px}
-  100% {bottom: -300px}
+
+[data-sonner-toast] {
+  background: var(--bs-body-bg, #f8f9fa) !important;
+  color: var(--bs-dark, #212529) !important;
+  border: 0px solid var(--bs-dark, #6c757d) !important;
+  font-weight: 500;
 }
-@keyframes remixui_animatetop  {
-  0% {bottom: 0px}
-  100% {bottom: -300px}
+
+[data-sonner-toast][data-styled="true"] {
+  padding: 16px 24px !important;
+  gap: 12px !important;
 }
-.remixui_animateTop {
-  -webkit-animation-name: remixui_animatetop;
-  -webkit-animation-duration: 2s;
-  animation-name: remixui_animatetop;
-  animation-duration: 2s;
-}
-.remixui_animateBottom {
-  -webkit-animation-name: remixui_animatebottom;
-  -webkit-animation-duration: 2s;
-  animation-name: remixui_animatebottom;
-  animation-duration: 2s;    
+
+/* Dark theme support */
+[data-sonner-toast][data-theme="dark"],
+.dark [data-sonner-toast] {
+  background: var(--bs-dark, #212529) !important;
+  color: var(--bs-light, #f8f9fa) !important;
+  border: 0px solid var(--bs-secondary, #6c757d) !important;
 }
