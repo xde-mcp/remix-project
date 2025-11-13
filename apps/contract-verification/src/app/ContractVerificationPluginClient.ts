@@ -132,6 +132,7 @@ export class ContractVerificationPluginClient extends PluginClient {
         if (validConfiguration(chainSettings, verifier)) {
           if (verifier === 'Etherscan' && !etherscanApiKey) {
             this.call('terminal', 'log', { type: 'warn', value: 'Etherscan verification skipped: API key not provided for auto-verification.' })
+            this.call('terminal', 'log', { type: 'warn', value: 'Go to the Settings panel input the key.' })
             continue
           }
           verificationPromises.push(this._verifyWithProvider(verifier, submittedContract, compilerAbstract, chainId, chainSettings))
